@@ -190,6 +190,317 @@ def draw_text_3d(x, y, z, text):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# INTERACTIVE OBSTACLES  (Assigned to: Ahona — Feature 1: Interactive Obstacle Design)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Obstacle:
+    """Base class for interactive 3D world obstacles."""
+
+    def __init__(self, x, y, z, width, height, depth, rotation=0.0,
+                 is_interactive=True, can_hide_inside=False, can_be_pushed=False,
+                 color=(0.5, 0.5, 0.5), accent_color=(0.3, 0.3, 0.3)):
+        self.x = float(x)
+        self.y = float(y)  # Base ground Y level
+        self.z = float(z)
+        self.width = float(width)
+        self.height = float(height)
+        self.depth = float(depth)
+        self.rotation = float(rotation)
+        self.is_interactive = is_interactive
+        self.can_hide_inside = can_hide_inside
+        self.can_be_pushed = can_be_pushed
+        self.color = color
+        self.accent_color = accent_color
+        self.is_player_hiding = False
+
+    def draw(self):
+        """Render 3D GLUT/OpenGL geometry. Subclasses override this."""
+        pass
+
+    def get_bounding_box(self):
+        """Return axis-aligned bounding box (min_x, max_x, min_y, max_y, min_z, max_z)."""
+        hw = self.width / 2.0
+        hd = self.depth / 2.0
+        return (
+            self.x - hw, self.x + hw,
+            self.y, self.y + self.height,
+            self.z - hd, self.z + hd
+        )
+
+    def distance_to(self, target_x, target_z):
+        """Calculate planar 2D distance from obstacle center to target position."""
+        dx = self.x - target_x
+        dz = self.z - target_z
+        return math.sqrt(dx * dx + dz * dz)
+
+
+class BoxObstacle(Obstacle):
+    """
+    Wooden Crate / Box Obstacle.
+    Can be pushed for cover or used to block paths and reach items.
+    """
+
+    def __init__(self, x, y, z, size=1.5, rotation=0.0,
+                 color=(0.55, 0.41, 0.08), accent_color=(0.35, 0.25, 0.05)):
+        super().__init__(
+            x=x, y=y, z=z,
+            width=size, height=size, depth=size,
+            rotation=rotation,
+            is_interactive=True,
+            can_hide_inside=False,
+            can_be_pushed=True,
+            color=color,
+            accent_color=accent_color
+        )
+        self.size = size
+
+    def draw(self):
+        s = self.size
+        by = self.y + s / 2.0
+
+        glPushMatrix()
+        glTranslatef(self.x, by, self.z)
+        glRotatef(self.rotation, 0.0, 1.0, 0.0)
+
+        # Main crate body
+        set_material(self.color)
+        glPushMatrix()
+        glScalef(s, s, s)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Wooden planks / cross-framing details
+        set_material(self.accent_color)
+        plank_off = s / 2.0 + 0.01
+
+        # Horizontal & vertical planks on front/back faces
+        for dz in (-plank_off, plank_off):
+            glPushMatrix()
+            glTranslatef(0.0, 0.0, dz)
+            glScalef(s * 0.9, 0.1, 0.04)
+            glutSolidCube(1)
+            glPopMatrix()
+
+            glPushMatrix()
+            glTranslatef(0.0, 0.0, dz)
+            glScalef(0.1, s * 0.9, 0.04)
+            glutSolidCube(1)
+            glPopMatrix()
+
+        # Metal corner brackets (small dark cubes)
+        set_material((0.2, 0.2, 0.2))
+        hs = s / 2.0
+        for dx in (-hs, hs):
+            for dy in (-hs + 0.1, hs - 0.1):
+                for dz in (-hs, hs):
+                    glPushMatrix()
+                    glTranslatef(dx, dy, dz)
+                    glutSolidCube(0.12)
+                    glPopMatrix()
+
+        glPopMatrix()
+
+
+class ClosetObstacle(Obstacle):
+    """
+    Tall Wooden Closet / Wardrobe.
+    Allows player to hide inside to evade guard line of sight.
+    """
+
+    def __init__(self, x, y, z, width=1.6, height=3.2, depth=1.2, rotation=0.0,
+                 color=(0.36, 0.22, 0.12), accent_color=(0.24, 0.14, 0.07)):
+        super().__init__(
+            x=x, y=y, z=z,
+            width=width, height=height, depth=depth,
+            rotation=rotation,
+            is_interactive=True,
+            can_hide_inside=True,
+            can_be_pushed=False,
+            color=color,
+            accent_color=accent_color
+        )
+
+    def draw(self):
+        w, h, d = self.width, self.height, self.depth
+        cy = self.y + h / 2.0
+        t = 0.1  # Panel thickness
+
+        glPushMatrix()
+        glTranslatef(self.x, cy, self.z)
+        glRotatef(self.rotation, 0.0, 1.0, 0.0)
+
+        # Back panel
+        set_material(self.color)
+        glPushMatrix()
+        glTranslatef(0.0, 0.0, -d / 2.0 + t / 2.0)
+        glScalef(w, h, t)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Left side panel
+        glPushMatrix()
+        glTranslatef(-w / 2.0 + t / 2.0, 0.0, 0.0)
+        glScalef(t, h, d)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Right side panel
+        glPushMatrix()
+        glTranslatef(w / 2.0 - t / 2.0, 0.0, 0.0)
+        glScalef(t, h, d)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Top ceiling panel & moulding
+        set_material(self.accent_color)
+        glPushMatrix()
+        glTranslatef(0.0, h / 2.0 - t / 2.0, 0.0)
+        glScalef(w + 0.1, t * 1.5, d + 0.1)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Bottom floor panel
+        glPushMatrix()
+        glTranslatef(0.0, -h / 2.0 + t / 2.0, 0.0)
+        glScalef(w, t, d)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Dual Closet Doors (front face)
+        door_w = (w - t * 2) / 2.0 - 0.02
+        door_h = h - t * 2 - 0.1
+        front_z = d / 2.0 - t / 2.0
+
+        set_material(self.color)
+        # Left door
+        glPushMatrix()
+        glTranslatef(-door_w / 2.0 - 0.01, 0.0, front_z)
+        glScalef(door_w, door_h, t * 0.8)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Right door
+        glPushMatrix()
+        glTranslatef(door_w / 2.0 + 0.01, 0.0, front_z)
+        glScalef(door_w, door_h, t * 0.8)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Metallic door handles
+        set_material((0.85, 0.75, 0.3))  # Brass handles
+        glPushMatrix()
+        glTranslatef(-0.06, 0.0, front_z + t)
+        glutSolidSphere(0.06, 8, 8)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(0.06, 0.0, front_z + t)
+        glutSolidSphere(0.06, 8, 8)
+        glPopMatrix()
+
+        glPopMatrix()
+
+
+class DumpsterObstacle(Obstacle):
+    """
+    Industrial Metal Dumpster.
+    Provides cover and can be pushed or hid inside.
+    """
+
+    def __init__(self, x, y, z, width=2.6, height=1.6, depth=1.6, rotation=0.0,
+                 color=(0.18, 0.35, 0.24), accent_color=(0.12, 0.22, 0.15)):
+        super().__init__(
+            x=x, y=y, z=z,
+            width=width, height=height, depth=depth,
+            rotation=rotation,
+            is_interactive=True,
+            can_hide_inside=True,
+            can_be_pushed=True,
+            color=color,
+            accent_color=accent_color
+        )
+
+    def draw(self):
+        w, h, d = self.width, self.height, self.depth
+        cy = self.y + h / 2.0
+
+        glPushMatrix()
+        glTranslatef(self.x, cy, self.z)
+        glRotatef(self.rotation, 0.0, 1.0, 0.0)
+
+        # Main dumpster steel tub
+        set_material(self.color)
+        glPushMatrix()
+        glScalef(w, h * 0.85, d)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Top heavy rim moulding / ledge
+        set_material(self.accent_color)
+        glPushMatrix()
+        glTranslatef(0.0, h * 0.42, 0.0)
+        glScalef(w + 0.1, 0.12, d + 0.1)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Black plastic lids (angled/split top)
+        set_material((0.1, 0.1, 0.12))
+        lid_w = w / 2.0 - 0.05
+        lid_d = d * 0.95
+        glPushMatrix()
+        glTranslatef(-lid_w / 2.0 - 0.02, h * 0.46, 0.0)
+        glRotatef(5.0, 0.0, 0.0, 1.0)  # Slightly open lid
+        glScalef(lid_w, 0.08, lid_d)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(lid_w / 2.0 + 0.02, h * 0.46, 0.0)
+        glRotatef(-5.0, 0.0, 0.0, 1.0)
+        glScalef(lid_w, 0.08, lid_d)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Side handles / lifting pegs
+        set_material((0.4, 0.4, 0.45))
+        for dx in (-w / 2.0 - 0.08, w / 2.0 + 0.08):
+            glPushMatrix()
+            glTranslatef(dx, 0.0, 0.0)
+            glScalef(0.12, 0.12, 0.6)
+            glutSolidCube(1)
+            glPopMatrix()
+
+        # Bottom heavy caster wheels
+        set_material((0.1, 0.1, 0.1))
+        wheel_r = 0.12
+        for dx in (-w * 0.4, w * 0.4):
+            for dz in (-d * 0.4, d * 0.4):
+                glPushMatrix()
+                glTranslatef(dx, -h * 0.45, dz)
+                glutSolidSphere(wheel_r, 8, 8)
+                glPopMatrix()
+
+        glPopMatrix()
+
+
+class ObstacleManager:
+    """Manages collection of interactive obstacles within a level."""
+
+    def __init__(self):
+        self.obstacles = []
+
+    def add_obstacle(self, obstacle):
+        self.obstacles.append(obstacle)
+
+    def draw_all(self):
+        for obs in self.obstacles:
+            obs.draw()
+
+    def get_obstacles(self):
+        return self.obstacles
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # TUTORIAL LEVEL  (was levels/tutorial.py)
 # Assigned to: Nafiz (Background/level design)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -449,17 +760,31 @@ class TutorialLevel:
         draw_sphere(0.0, bulb_y, 0.0, 0.25, cls.COLOR_BULB, emissive=cls.COLOR_BULB_EMISSIVE)
         draw_cube(0.0, cls.ROOM_HEIGHT - 0.05, 0.0, 0.3, 0.1, 0.3, (0.2, 0.2, 0.2))
 
+    obstacle_manager = None
+
+    @classmethod
+    def get_obstacle_manager(cls):
+        """Get or initialize Ahona's obstacle manager for the level."""
+        if cls.obstacle_manager is None:
+            cls.obstacle_manager = ObstacleManager()
+            # Box / Wooden Crate
+            cls.obstacle_manager.add_obstacle(
+                BoxObstacle(x=-4.0, y=0.0, z=-2.0, size=1.5, rotation=15.0)
+            )
+            # Wardrobe / Closet (Hiding Cover)
+            cls.obstacle_manager.add_obstacle(
+                ClosetObstacle(x=7.5, y=0.0, z=-4.0, width=1.6, height=3.2, depth=1.2, rotation=-90.0)
+            )
+            # Industrial Metal Dumpster
+            cls.obstacle_manager.add_obstacle(
+                DumpsterObstacle(x=-6.5, y=0.0, z=4.0, width=2.6, height=1.6, depth=1.6, rotation=30.0)
+            )
+        return cls.obstacle_manager
+
     @classmethod
     def draw_wooden_box(cls):
-        """Draw a wooden crate — placeholder for Ahona's obstacle system."""
-        box_x, box_z = cls.BOX_POS
-        s  = cls.BOX_SIZE
-        by = s / 2.0
-        dark_wood = (0.45, 0.33, 0.06)
-        draw_cube(box_x, by, box_z, s, s, s, cls.COLOR_WOOD_CRATE)
-        plank_off = s / 2.0 + 0.01
-        draw_cube(box_x, by, box_z + plank_off, s * 0.9, 0.1,    0.05, dark_wood)
-        draw_cube(box_x, by, box_z + plank_off, 0.1,    s * 0.9, 0.05, dark_wood)
+        """Draw Ahona's interactive obstacle system (Box, Closet, Dumpster)."""
+        cls.get_obstacle_manager().draw_all()
 
     @classmethod
     def draw_table(cls):
