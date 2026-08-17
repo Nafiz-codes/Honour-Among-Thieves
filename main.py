@@ -4,6 +4,7 @@ Honour Among Thieves — Single-file submission build.
 Merged from:
   - utils/drawing.py   (drawing helpers)
   - levels/tutorial.py (TutorialLevel class)
+  - levels/level2.py   (HeistLevel — Grand Mansion Arena)
   - main.py            (WindowConfig, Camera, GameState, GLUT loop)
 
 All geometry uses only OpenGL/GLUT primitives from the course template + glDepth.
@@ -18,6 +19,9 @@ import time
 from OpenGL.GL import *
 from OpenGL.GLUT import *
 from OpenGL.GLU import *
+
+# Level 2 — must be imported after OpenGL is in scope
+from levels.level2 import HeistLevel
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1017,6 +1021,7 @@ class GameState:
 _spawn     = TutorialLevel.spawn_pos()
 camera     = Camera(_spawn[0], _spawn[1], _spawn[2])
 game_state = GameState()
+_light_toggle_index = 0   # Cycles through HeistLevel breakable lights via 'l'
 start_time = 0.0
 
 
@@ -1057,6 +1062,8 @@ def display():
 
     if game_state.current == GameState.TUTORIAL:
         TutorialLevel.draw(time_elapsed)
+    elif game_state.current == GameState.STEALING_AREA:
+        HeistLevel.draw(time_elapsed)
 
     glutSwapBuffers()
 
@@ -1077,9 +1084,40 @@ def reshape(width, height):
 
 
 def keyboard_down(key, x, y):
+    global _light_toggle_index
+
     if key == b'\x1b':
         camera.toggle_capture()
         return
+
+    # '2' — jump to Level 2 (Grand Heist Arena) for testing
+    if key == b'2':
+        game_state.current = GameState.STEALING_AREA
+        sp = HeistLevel.spawn_pos()
+        camera.x, camera.y, camera.z = sp[0], sp[1], sp[2]
+        camera.yaw   = -90.0   # Face north into the arena
+        camera.pitch = 0.0
+        print("Switched to Level 2 — Grand Heist Arena")
+        return
+
+    # '1' — jump back to Tutorial
+    if key == b'1':
+        game_state.current = GameState.TUTORIAL
+        sp = TutorialLevel.spawn_pos()
+        camera.x, camera.y, camera.z = sp[0], sp[1], sp[2]
+        camera.yaw   = 90.0
+        camera.pitch = 0.0
+        print("Switched to Tutorial Level")
+        return
+
+    # 'l' / 'L' — cycle breakable lights off (simulates projectile hit)
+    if key in (b'l', b'L'):
+        HeistLevel.toggle_light(_light_toggle_index % 6)
+        print(f"Light {_light_toggle_index % 6} toggled "
+              f"({'ON' if HeistLevel.lights_on[_light_toggle_index % 6] else 'OFF'})")
+        _light_toggle_index += 1
+        return
+
     camera.on_key_down(key)
 
 
@@ -1115,8 +1153,9 @@ def main():
     glutSetCursor(GLUT_CURSOR_NONE)
 
     print("=== Honour Among Thieves ===")
-    print("Tutorial Area loaded.")
+    print("Tutorial Area loaded. Press '2' to enter Level 2 — Grand Heist Arena.")
     print("Controls: WASD to move, Mouse to look, ESC to release cursor")
+    print("Level 2 keys: '2' = Heist Arena, '1' = Tutorial, 'L' = break next light")
     print()
 
     glutMainLoop()
