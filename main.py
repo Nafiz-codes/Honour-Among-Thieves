@@ -36,6 +36,7 @@ def set_material(color, emissive=None):
         emissive: Optional (r, g, b) emissive glow color.
     """
     r, g, b = color
+    glColor3f(r, g, b)  # Ensure it works with GL_COLOR_MATERIAL
     glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT,  [r * 0.3, g * 0.3, b * 0.3, 1.0])
     glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE,  [r, g, b, 1.0])
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, [0.2, 0.2, 0.2, 1.0])
@@ -191,6 +192,323 @@ def draw_text_3d(x, y, z, text):
     for ch in text:
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(ch))
     glEnable(GL_LIGHTING)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# THIEF CHARACTER DRAWING  (Assigned to: Nafiz — main character visuals)
+# Blocky OpenGL rendition of the hooded thief: dark outfit, tan cape,
+# utility belt, chunky gloves, heavy boots. "Made by a rookie" aesthetic.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MainCharacter:
+    """The main blocky thief character. Made by a rookie."""
+
+    # ── palette ──────────────────────────────────────────────────────────────
+    C_SKIN        = (0.85, 0.75, 0.65)   # Pale-ish skin
+    C_SMIRK       = (0.70, 0.10, 0.10)   # Red smirk / face mark
+    C_HAIR        = (0.05, 0.05, 0.05)   # Black hair
+    C_TORSO       = (0.08, 0.10, 0.15)   # Dark blue/black shirt
+    C_TORSO_DARK  = (0.05, 0.06, 0.10)   # Darker shadow
+    C_BELT        = (0.40, 0.25, 0.12)   # Brown belt
+    C_BUCKLE      = (0.75, 0.75, 0.80)   # Metallic studs/buckle
+    C_CAPE        = (0.75, 0.55, 0.25)   # Tan/brown cape
+    C_CAPE_TORN   = (0.60, 0.40, 0.15)   # Darker torn edge
+    C_GLOVE       = (0.45, 0.28, 0.15)   # Brown leather glove
+    C_LEG         = (0.10, 0.10, 0.12)   # Dark pants
+    C_BOOT        = (0.35, 0.20, 0.10)   # Brown boots
+    C_BOOT_SOLE   = (0.15, 0.10, 0.05)   # Boot sole
+    C_BOOT_CAP    = (0.40, 0.25, 0.12)   # Boot cap
+    C_DAGGER_HILT = (0.55, 0.05, 0.05)   # Dark red dagger handle
+    C_DAGGER_BLD  = (0.60, 0.60, 0.65)   # Blade (steel)
+
+    def __init__(self, x=0.0, y=0.0, z=0.0, yaw_deg=0.0):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.yaw_deg = yaw_deg
+
+    def draw(self, time_elapsed=0.0, is_moving=False):
+        """Draw the blocky thief character with animation."""
+        # Animation calculations
+        if is_moving:
+            swing = math.sin(time_elapsed * 12.0) * 45.0
+            bob_y = abs(math.sin(time_elapsed * 12.0)) * 0.1
+        else:
+            swing = 0.0
+            bob_y = math.sin(time_elapsed * 2.0) * 0.03
+
+        glPushMatrix()
+        glTranslatef(self.x, self.y + bob_y, self.z)
+        glRotatef(self.yaw_deg, 0.0, 1.0, 0.0)
+
+        # ── LEFT LEG & BOOT ──────────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(-0.17, 1.0, 0.0)           # Move to hip joint
+        glRotatef(swing, 1.0, 0.0, 0.0)         # Swing leg
+        glTranslatef(0.17, -1.0, 0.0)           # Move back
+        
+        draw_cube(-0.17, 0.70, 0.0,   0.21, 0.60, 0.21, self.C_LEG)          # Leg
+        draw_cube(-0.18, 0.20, 0.0,   0.22, 0.40, 0.28, self.C_BOOT)         # Boot
+        draw_cube(-0.18, 0.04, 0.02,  0.24, 0.08, 0.32, self.C_BOOT_SOLE)    # Boot sole
+        glPopMatrix()
+
+        # ── RIGHT LEG & BOOT ─────────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(0.17, 1.0, 0.0)
+        glRotatef(-swing, 1.0, 0.0, 0.0)
+        glTranslatef(-0.17, -1.0, 0.0)
+        
+        draw_cube( 0.17, 0.70, 0.0,   0.21, 0.60, 0.21, self.C_LEG)
+        draw_cube( 0.18, 0.20, 0.0,   0.22, 0.40, 0.28, self.C_BOOT)
+        draw_cube( 0.18, 0.04, 0.02,  0.24, 0.08, 0.32, self.C_BOOT_SOLE)
+        glPopMatrix()
+
+        # ── UTILITY BELT ─────────────────────────────────────────────────────────
+        draw_cube(0.0, 1.07, 0.0,     0.60, 0.14, 0.34, self.C_BELT)
+        draw_cube(0.0, 1.07, 0.18,    0.14, 0.14, 0.06, self.C_BUCKLE)       # Buckle
+        draw_cube(-0.22, 1.07, 0.14,  0.14, 0.16, 0.12, self.C_BELT)         # Pouch L
+        draw_cube( 0.22, 1.07, 0.14,  0.14, 0.16, 0.12, self.C_BELT)         # Pouch R
+
+        # ── TORSO ────────────────────────────────────────────────────────────────
+        draw_cube(0.0, 1.30, 0.0,     0.56, 0.60, 0.32, self.C_TORSO)
+        draw_cube(0.0, 1.38, 0.16,    0.40, 0.30, 0.06, self.C_TORSO_DARK)   # Chest pad
+
+        # ── LEFT ARM ─────────────────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(-0.40, 1.5, 0.0)           # Shoulder joint
+        glRotatef(-swing, 1.0, 0.0, 0.0)
+        glTranslatef(0.40, -1.5, 0.0)
+        
+        draw_cube(-0.40, 1.38, 0.0,   0.18, 0.44, 0.20, self.C_TORSO)        # Upper arm
+        draw_cube(-0.42, 1.08, 0.04,  0.20, 0.28, 0.22, self.C_GLOVE)        # Forearm
+        draw_cube(-0.44, 0.96, 0.06,  0.22, 0.18, 0.22, self.C_GLOVE)        # Hand
+        glPopMatrix()
+
+        # ── RIGHT ARM ────────────────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(0.40, 1.5, 0.0)
+        glRotatef(swing, 1.0, 0.0, 0.0)
+        glTranslatef(-0.40, -1.5, 0.0)
+        
+        draw_cube( 0.40, 1.38, 0.0,   0.18, 0.44, 0.20, self.C_TORSO)
+        draw_cube( 0.44, 1.10, -0.04, 0.20, 0.28, 0.22, self.C_GLOVE)
+        draw_cube( 0.46, 0.98, -0.06, 0.22, 0.18, 0.22, self.C_GLOVE)
+        glPopMatrix()
+
+        # Cape has been removed
+
+        # ── NECK & HEAD ──────────────────────────────────────────────────────────
+        draw_cube(0.0, 1.64, 0.0,     0.18, 0.16, 0.18, self.C_SKIN)
+        draw_cube(0.0, 1.86, 0.0,     0.40, 0.38, 0.38, self.C_SKIN)
+        
+        # Eyes
+        draw_cube(-0.10, 1.90, 0.19,  0.10, 0.08, 0.04, (0.06, 0.04, 0.04))
+        draw_cube( 0.10, 1.90, 0.19,  0.10, 0.08, 0.04, (0.06, 0.04, 0.04))
+        
+        # Red smirk/mark
+        draw_cube(0.0, 1.76, 0.19,    0.28, 0.05, 0.03, self.C_SMIRK)
+
+        # ── HAIR (Spikes + Top-knot) ─────────────────────────────────────────────
+        draw_cube(0.0,   2.06, -0.04, 0.38, 0.12, 0.32, self.C_HAIR)   # Base
+        draw_cube(0.0,   2.16,  0.0,  0.12, 0.22, 0.12, self.C_HAIR)   # Top-knot
+        draw_cube( 0.14, 2.14,  0.0,  0.10, 0.10, 0.10, self.C_HAIR)   # Right spike
+        draw_cube(-0.18, 2.12,  0.0,  0.08, 0.08, 0.08, self.C_HAIR)   # Left spike
+
+        # ── DAGGER ───────────────────────────────────────────────────────────────
+        draw_cube(0.0, 1.22, -0.28,   0.22, 0.06, 0.06, self.C_DAGGER_BLD)   # Guard (steel)
+        draw_cube(0.0, 1.12, -0.30,   0.08, 0.22, 0.08, self.C_DAGGER_HILT)  # Grip (red)
+        draw_cube(0.0, 1.00, -0.30,   0.12, 0.08, 0.12, self.C_DAGGER_BLD)   # Pommel (steel)
+        draw_cube(0.0, 1.34, -0.30,   0.05, 0.20, 0.05, self.C_DAGGER_BLD)   # Blade tip
+
+        glPopMatrix()
+
+
+class ThinPoliceModel:
+    """Thin police officer with Papa's Pizzeria spacing."""
+    C_SKIN       = (0.85, 0.75, 0.65)
+    C_UNIFORM    = (0.10, 0.15, 0.40)   # Blue
+    C_UNIFORM_DK = (0.05, 0.10, 0.30)
+    C_BADGE      = (0.90, 0.80, 0.10)   # Yellow
+    C_BELT       = (0.10, 0.10, 0.10)   # Black
+    C_SHOE       = (0.05, 0.05, 0.05)   # Black
+    C_HAT        = (0.10, 0.15, 0.40)
+    C_HAT_VISOR  = (0.05, 0.05, 0.05)
+
+    def __init__(self, x=0.0, y=0.0, z=0.0, yaw_deg=0.0):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.yaw_deg = yaw_deg
+
+    def draw(self, time_elapsed=0.0, is_moving=False):
+        if is_moving:
+            swing = math.sin(time_elapsed * 12.0) * 45.0
+            bob_y = abs(math.sin(time_elapsed * 12.0)) * 0.1
+        else:
+            swing = 0.0
+            bob_y = math.sin(time_elapsed * 2.0) * 0.03
+
+        glPushMatrix()
+        glTranslatef(self.x, self.y + bob_y, self.z)
+        glRotatef(self.yaw_deg, 0.0, 1.0, 0.0)
+
+        # ── LEFT LEG (Thin & Spaced) ──────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(-0.15, 1.0, 0.0)
+        glRotatef(swing, 1.0, 0.0, 0.0)
+        glTranslatef(0.15, -1.0, 0.0)
+        draw_cube(-0.15, 0.55, 0.0,   0.10, 0.90, 0.10, self.C_UNIFORM_DK) # Thin leg
+        draw_cube(-0.15, 0.08, 0.05,  0.12, 0.16, 0.20, self.C_SHOE)       # Shoe
+        glPopMatrix()
+
+        # ── RIGHT LEG (Thin & Spaced) ─────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(0.15, 1.0, 0.0)
+        glRotatef(-swing, 1.0, 0.0, 0.0)
+        glTranslatef(-0.15, -1.0, 0.0)
+        draw_cube( 0.15, 0.55, 0.0,   0.10, 0.90, 0.10, self.C_UNIFORM_DK) # Thin leg
+        draw_cube( 0.15, 0.08, 0.05,  0.12, 0.16, 0.20, self.C_SHOE)       # Shoe
+        glPopMatrix()
+
+        # ── TORSO (Very thin) ─────────────────────────────────────────────────
+        draw_cube(0.0, 1.35, 0.0,     0.25, 0.70, 0.15, self.C_UNIFORM)
+        
+        # Belt
+        draw_cube(0.0, 1.00, 0.0,     0.26, 0.10, 0.16, self.C_BELT)
+        draw_cube(0.0, 1.00, 0.09,    0.08, 0.08, 0.02, self.C_BADGE) # Buckle
+        
+        # Badge
+        draw_cube(-0.06, 1.55, 0.08,  0.06, 0.06, 0.02, self.C_BADGE)
+
+        # ── LEFT ARM (Thin) ───────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(-0.18, 1.6, 0.0)
+        glRotatef(-swing, 1.0, 0.0, 0.0)
+        glTranslatef(0.18, -1.6, 0.0)
+        draw_cube(-0.18, 1.30, 0.0,   0.08, 0.60, 0.08, self.C_UNIFORM)
+        draw_cube(-0.18, 0.95, 0.0,   0.10, 0.10, 0.10, self.C_SKIN) # Hand
+        glPopMatrix()
+
+        # ── RIGHT ARM (Thin) ──────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(0.18, 1.6, 0.0)
+        glRotatef(swing, 1.0, 0.0, 0.0)
+        glTranslatef(-0.18, -1.6, 0.0)
+        draw_cube( 0.18, 1.30, 0.0,   0.08, 0.60, 0.08, self.C_UNIFORM)
+        draw_cube( 0.18, 0.95, 0.0,   0.10, 0.10, 0.10, self.C_SKIN) # Hand
+        glPopMatrix()
+
+        # ── HEAD (Large, Papa's style) ────────────────────────────────────────
+        draw_cube(0.0, 1.76, 0.0,     0.10, 0.12, 0.10, self.C_SKIN) # Neck
+        draw_cube(0.0, 2.05, 0.0,     0.45, 0.45, 0.45, self.C_SKIN) # Huge Head
+        
+        # Eyes
+        draw_cube(-0.12, 2.10, 0.23,  0.08, 0.08, 0.04, self.C_SHOE)
+        draw_cube( 0.12, 2.10, 0.23,  0.08, 0.08, 0.04, self.C_SHOE)
+
+        # Mustache
+        draw_cube(0.0, 1.95, 0.24,    0.20, 0.05, 0.04, self.C_SHOE)
+
+        # Hat
+        draw_cube(0.0, 2.30, 0.0,     0.46, 0.10, 0.46, self.C_HAT)
+        draw_cube(0.0, 2.25, 0.25,    0.46, 0.04, 0.15, self.C_HAT_VISOR)
+        draw_cube(0.0, 2.30, 0.24,    0.08, 0.08, 0.02, self.C_BADGE)
+
+        glPopMatrix()
+
+
+class FatPoliceModel:
+    """Fat police officer with wide torso."""
+    C_SKIN       = (0.85, 0.75, 0.65)
+    C_UNIFORM    = (0.10, 0.15, 0.40)
+    C_UNIFORM_DK = (0.05, 0.10, 0.30)
+    C_BADGE      = (0.90, 0.80, 0.10)
+    C_BELT       = (0.10, 0.10, 0.10)
+    C_SHOE       = (0.05, 0.05, 0.05)
+    C_HAT        = (0.10, 0.15, 0.40)
+    C_HAT_VISOR  = (0.05, 0.05, 0.05)
+
+    def __init__(self, x=0.0, y=0.0, z=0.0, yaw_deg=0.0):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.yaw_deg = yaw_deg
+
+    def draw(self, time_elapsed=0.0, is_moving=False):
+        if is_moving:
+            swing = math.sin(time_elapsed * 8.0) * 35.0  # Slower, heavier swing
+            bob_y = abs(math.sin(time_elapsed * 8.0)) * 0.15 # Heavier bob
+        else:
+            swing = 0.0
+            bob_y = math.sin(time_elapsed * 1.5) * 0.04
+
+        glPushMatrix()
+        glTranslatef(self.x, self.y + bob_y, self.z)
+        glRotatef(self.yaw_deg, 0.0, 1.0, 0.0)
+
+        # ── LEFT LEG (Stubby) ─────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(-0.25, 0.6, 0.0)
+        glRotatef(swing, 1.0, 0.0, 0.0)
+        glTranslatef(0.25, -0.6, 0.0)
+        draw_cube(-0.25, 0.35, 0.0,   0.25, 0.50, 0.25, self.C_UNIFORM_DK)
+        draw_cube(-0.25, 0.08, 0.05,  0.28, 0.16, 0.30, self.C_SHOE)
+        glPopMatrix()
+
+        # ── RIGHT LEG (Stubby) ────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(0.25, 0.6, 0.0)
+        glRotatef(-swing, 1.0, 0.0, 0.0)
+        glTranslatef(-0.25, -0.6, 0.0)
+        draw_cube( 0.25, 0.35, 0.0,   0.25, 0.50, 0.25, self.C_UNIFORM_DK)
+        draw_cube( 0.25, 0.08, 0.05,  0.28, 0.16, 0.30, self.C_SHOE)
+        glPopMatrix()
+
+        # ── TORSO (Wide & Roundish) ───────────────────────────────────────────
+        draw_cube(0.0, 1.15, 0.0,     0.70, 0.90, 0.55, self.C_UNIFORM)
+        
+        # Belt (below belly)
+        draw_cube(0.0, 0.70, 0.0,     0.72, 0.10, 0.57, self.C_BELT)
+        draw_cube(0.0, 0.70, 0.29,    0.10, 0.10, 0.02, self.C_BADGE) # Buckle
+        
+        # Badge
+        draw_cube(-0.18, 1.35, 0.28,  0.08, 0.08, 0.02, self.C_BADGE)
+
+        # ── LEFT ARM (Thick) ──────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(-0.45, 1.4, 0.0)
+        glRotatef(-swing, 1.0, 0.0, 0.0)
+        glTranslatef(0.45, -1.4, 0.0)
+        draw_cube(-0.45, 1.05, 0.0,   0.20, 0.70, 0.20, self.C_UNIFORM)
+        draw_cube(-0.45, 0.65, 0.0,   0.16, 0.16, 0.16, self.C_SKIN) # Hand
+        glPopMatrix()
+
+        # ── RIGHT ARM (Thick) ─────────────────────────────────────────────────
+        glPushMatrix()
+        glTranslatef(0.45, 1.4, 0.0)
+        glRotatef(swing, 1.0, 0.0, 0.0)
+        glTranslatef(-0.45, -1.4, 0.0)
+        draw_cube( 0.45, 1.05, 0.0,   0.20, 0.70, 0.20, self.C_UNIFORM)
+        draw_cube( 0.45, 0.65, 0.0,   0.16, 0.16, 0.16, self.C_SKIN) # Hand
+        glPopMatrix()
+
+        # ── HEAD (Small relative to body) ─────────────────────────────────────
+        draw_cube(0.0, 1.65, 0.0,     0.20, 0.10, 0.20, self.C_SKIN) # Neck
+        draw_cube(0.0, 1.85, 0.0,     0.32, 0.32, 0.32, self.C_SKIN) # Head
+        
+        # Eyes
+        draw_cube(-0.08, 1.90, 0.17,  0.06, 0.06, 0.03, self.C_SHOE)
+        draw_cube( 0.08, 1.90, 0.17,  0.06, 0.06, 0.03, self.C_SHOE)
+
+        # Mustache
+        draw_cube(0.0, 1.78, 0.17,    0.16, 0.06, 0.04, self.C_SHOE)
+
+        # Hat
+        draw_cube(0.0, 2.05, 0.0,     0.34, 0.10, 0.34, self.C_HAT)
+        draw_cube(0.0, 2.00, 0.17,    0.34, 0.04, 0.15, self.C_HAT_VISOR)
+        draw_cube(0.0, 2.05, 0.17,    0.06, 0.06, 0.02, self.C_BADGE)
+
+        glPopMatrix()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -857,6 +1175,53 @@ class TutorialLevel:
             "START"
         )
 
+    _colliders = None
+
+    @classmethod
+    def get_colliders(cls):
+        """Automatically extract collision AABBs from draw calls."""
+        if cls._colliders is not None:
+            return cls._colliders
+
+        cls._colliders = []
+        import sys
+        
+        # We hook the global draw_cube in the main module where TutorialLevel resides
+        main_mod = sys.modules[__name__]
+        original_draw_cube = main_mod.draw_cube
+
+        def mock_draw_cube(x, y, z, sx, sy, sz, color, emissive=None):
+            # A cube spans [y - sy/2, y + sy/2]
+            c_min_y = y - sy / 2.0
+            c_max_y = y + sy / 2.0
+            
+            # Filter out flat floors (max_y < 0.1) and pure ceiling slabs
+            # Keep everything that has vertical extent above floor level
+            if c_max_y > 0.1 and sy > 0.08:
+                hw = sx / 2.0
+                hz = sz / 2.0
+                cls._colliders.append((x - hw, x + hw, c_min_y, c_max_y, z - hz, z + hz))
+                
+        main_mod.draw_cube = mock_draw_cube
+
+        try:
+            # Call all geometric draw functions that might contain walls or obstacles
+            cls.draw_walls()
+            cls.draw_alcove()
+            cls.draw_table()
+            cls.draw_pillars()
+            cls.draw_stacked_crates()
+            # We don't call draw_wooden_box because ObstacleManager uses its own transforms,
+            # but we can manually add obstacle bounds.
+            for obs in cls.get_obstacle_manager().obstacles:
+                min_x, max_x, min_y, max_y, min_z, max_z = obs.get_bounding_box()
+                if max_y > 0.1:
+                    cls._colliders.append((min_x, max_x, min_y, max_y, min_z, max_z))
+        finally:
+            main_mod.draw_cube = original_draw_cube
+
+        return cls._colliders
+
     @classmethod
     def draw(cls, time_elapsed):
         """Main draw entry point — called every frame by the game loop.
@@ -921,7 +1286,9 @@ class Camera:
         self.yaw   = Camera.START_YAW
         self.pitch = Camera.START_PITCH
 
-        self.keys_pressed = {b'w': False, b's': False, b'a': False, b'd': False}
+        self.keys_pressed = {b'w': False, b's': False, b'a': False, b'd': False, b' ': False}
+        self.y_velocity = 0.0
+        self.ground_y = y  # Store initial Y as the ground level
 
         self.mouse_last_x = WindowConfig.WIDTH  // 2
         self.mouse_last_y = WindowConfig.HEIGHT // 2
@@ -936,8 +1303,15 @@ class Camera:
         lz = math.cos(rad_pitch) * math.sin(rad_yaw)
         return lx, ly, lz
 
-    def process_movement(self):
-        """Update position based on currently pressed keys."""
+    def process_movement(self, colliders=None):
+        """Update position based on currently pressed keys, with full 3D collision.
+
+        Colliders are 6-tuples: (min_x, max_x, min_y, max_y, min_z, max_z)
+        in world space. camera.y is eye-level, which is PLAYER_EYE_HEIGHT
+        above the player's feet in world space.
+        """
+        PLAYER_EYE_HEIGHT = 1.0   # camera.y sits this far above the feet
+
         rad_yaw   = math.radians(self.yaw)
         forward_x = math.cos(rad_yaw)
         forward_z = math.sin(rad_yaw)
@@ -945,17 +1319,116 @@ class Camera:
         right_z   = math.sin(rad_yaw - math.pi / 2.0)
         spd = Camera.MOVE_SPEED
 
-        if self.keys_pressed.get(b'w'): self.x += forward_x * spd; self.z += forward_z * spd
-        if self.keys_pressed.get(b's'): self.x -= forward_x * spd; self.z -= forward_z * spd
-        if self.keys_pressed.get(b'a'): self.x += right_x   * spd; self.z += right_z   * spd
-        if self.keys_pressed.get(b'd'): self.x -= right_x   * spd; self.z -= right_z   * spd
+        new_x = self.x
+        new_z = self.z
+
+        if self.keys_pressed.get(b'w'): new_x += forward_x * spd; new_z += forward_z * spd
+        if self.keys_pressed.get(b's'): new_x -= forward_x * spd; new_z -= forward_z * spd
+        if self.keys_pressed.get(b'a'): new_x += right_x   * spd; new_z += right_z   * spd
+        if self.keys_pressed.get(b'd'): new_x -= right_x   * spd; new_z -= right_z   * spd
+
+        # ── Player physical parameters (world space) ─────────────────────────
+        pr = 0.4                                    # Horizontal collision radius
+        feet_y = self.y - PLAYER_EYE_HEIGHT         # Feet in world space
+        head_y = feet_y + 1.8                       # Head in world space
+        step_up = 0.05                              # Maximum auto-step height
+
+        # ── XZ wall blocking ─────────────────────────────────────────────────
+        if colliders:
+            collision_x = False
+            collision_z = False
+
+            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+                # Block only if the player's body overlaps the collider vertically
+                # AND the player is NOT standing on top (feet below top - step_up)
+                if (feet_y < c_max_y - step_up and head_y > c_min_y and
+                    new_x + pr > c_min_x and new_x - pr < c_max_x and
+                    self.z + pr > c_min_z and self.z - pr < c_max_z):
+                    collision_x = True
+                    break
+
+            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+                if (feet_y < c_max_y - step_up and head_y > c_min_y and
+                    self.x + pr > c_min_x and self.x - pr < c_max_x and
+                    new_z + pr > c_min_z and new_z - pr < c_max_z):
+                    collision_z = True
+                    break
+
+            if not collision_x:
+                self.x = new_x
+            if not collision_z:
+                self.z = new_z
+        else:
+            self.x = new_x
+            self.z = new_z
+
+        # ── Determine what the player is currently standing on ────────────────
+        # (used for jump trigger — must be computed BEFORE gravity)
+        standing_surface = 0.0   # World-space Y of the floor
+        if colliders:
+            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+                if (self.x + pr > c_min_x and self.x - pr < c_max_x and
+                    self.z + pr > c_min_z and self.z - pr < c_max_z):
+                    # Player feet are at or very near the top of this surface
+                    if abs(feet_y - c_max_y) < 0.15 and c_max_y > standing_surface:
+                        standing_surface = c_max_y
+
+        standing_camera_y = standing_surface + PLAYER_EYE_HEIGHT
+        on_ground = abs(self.y - standing_camera_y) < 0.15
+
+        # ── Jump trigger ─────────────────────────────────────────────────────
+        if self.keys_pressed.get(b' ') and on_ground:
+            self.y_velocity = 0.22
+
+        # ── Apply gravity ────────────────────────────────────────────────────
+        prev_feet = self.y - PLAYER_EYE_HEIGHT      # Feet before gravity
+        self.y += self.y_velocity
+        self.y_velocity -= 0.01
+        new_feet = self.y - PLAYER_EYE_HEIGHT        # Feet after gravity
+
+        # ── Landing detection (sweep test) ───────────────────────────────────
+        # Find the highest surface the player is falling through this frame.
+        best_landing = 0.0    # World-space floor
+        if colliders:
+            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+                if (self.x + pr > c_min_x and self.x - pr < c_max_x and
+                    self.z + pr > c_min_z and self.z - pr < c_max_z):
+                    # Landing: player feet were above (or at) the surface,
+                    # and have now fallen to or below the surface
+                    if (prev_feet >= c_max_y - 0.08 and
+                        new_feet <= c_max_y + 0.05 and
+                        c_max_y > best_landing):
+                        best_landing = c_max_y
+
+        landing_camera_y = best_landing + PLAYER_EYE_HEIGHT
+        if self.y < landing_camera_y:
+            self.y = landing_camera_y
+            self.y_velocity = 0.0
+
+        # ── Absolute floor safety net ────────────────────────────────────────
+        if self.y < self.ground_y:
+            self.y = self.ground_y
+            self.y_velocity = 0.0
+
+    def is_moving(self):
+        """Return True if any movement key is pressed."""
+        return any(self.keys_pressed.get(k) for k in (b'w', b's', b'a', b'd'))
 
     def apply(self):
         """Apply camera transform to the OpenGL modelview matrix."""
         lx, ly, lz = self._look_direction()
+        
+        # 3rd person: Camera is behind and slightly above the player
+        distance = 3.0
+        height_offset = 1.2
+        
+        cam_x = self.x - lx * distance
+        cam_y = self.y + height_offset - ly * distance
+        cam_z = self.z - lz * distance
+
         glLoadIdentity()
-        gluLookAt(self.x, self.y, self.z,
-                  self.x + lx, self.y + ly, self.z + lz,
+        gluLookAt(cam_x, cam_y, cam_z,
+                  self.x, self.y + 1.0, self.z,
                   0.0, 1.0, 0.0)
 
     def on_key_down(self, key):
@@ -1021,6 +1494,9 @@ class GameState:
 _spawn     = TutorialLevel.spawn_pos()
 camera     = Camera(_spawn[0], _spawn[1], _spawn[2])
 game_state = GameState()
+player_character = MainCharacter()
+_temp_thin_police = ThinPoliceModel(x=3.0, y=0.0, z=6.0, yaw_deg=-45)
+_temp_fat_police = FatPoliceModel(x=-3.0, y=0.0, z=6.0, yaw_deg=45)
 _light_toggle_index = 0   # Cycles through HeistLevel breakable lights via 'l'
 start_time = 0.0
 
@@ -1055,15 +1531,35 @@ def display():
     """Main render callback."""
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     setup_projection()
-    camera.process_movement()
+
+    current_level_cls = None
+    if game_state.current == GameState.TUTORIAL:
+        current_level_cls = TutorialLevel
+    elif game_state.current == GameState.STEALING_AREA:
+        current_level_cls = HeistLevel
+
+    colliders = current_level_cls.get_colliders() if current_level_cls else None
+    camera.process_movement(colliders)
     camera.apply()
 
     time_elapsed = time.time() - start_time
 
+    if current_level_cls:
+        current_level_cls.draw(time_elapsed)
+
+    # Update player character to match the camera's position
+    # The camera y represents the head level (approx 1.0 unit above ground)
+    player_character.x = camera.x
+    player_character.y = camera.y - 1.0
+    player_character.z = camera.z
+    # Adjust yaw so the character faces the direction the camera is looking
+    player_character.yaw_deg = -camera.yaw + 90.0
+    player_character.draw(time_elapsed, camera.is_moving())
+
+    # Temporary: Draw the police models for review
     if game_state.current == GameState.TUTORIAL:
-        TutorialLevel.draw(time_elapsed)
-    elif game_state.current == GameState.STEALING_AREA:
-        HeistLevel.draw(time_elapsed)
+        _temp_thin_police.draw(time_elapsed, is_moving=False)
+        _temp_fat_police.draw(time_elapsed, is_moving=False)
 
     glutSwapBuffers()
 
