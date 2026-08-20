@@ -22,6 +22,7 @@ from OpenGL.GLU import *
 
 # Level 2 — must be imported after OpenGL is in scope
 from levels.level2 import HeistLevel
+from utils.inventory import InventoryManager, InventoryItem
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1223,7 +1224,7 @@ class TutorialLevel:
         return cls._colliders
 
     @classmethod
-    def draw(cls, time_elapsed):
+    def draw(cls, time_elapsed, camera_pos=None):
         """Main draw entry point — called every frame by the game loop.
 
         Args:
@@ -1327,11 +1328,19 @@ class Camera:
         if self.keys_pressed.get(b'a'): new_x += right_x   * spd; new_z += right_z   * spd
         if self.keys_pressed.get(b'd'): new_x -= right_x   * spd; new_z -= right_z   * spd
 
+        # ── Spatial Broad-Phase Filter ────────────────────────────────────────
+        if colliders:
+            px, pz = self.x, self.z
+            colliders = [
+                c for c in colliders
+                if (c[0] - 4.0 <= px <= c[1] + 4.0 and c[4] - 4.0 <= pz <= c[5] + 4.0)
+            ]
+
         # ── Player physical parameters (world space) ─────────────────────────
         pr = 0.4                                    # Horizontal collision radius
         feet_y = self.y - PLAYER_EYE_HEIGHT         # Feet in world space
         head_y = feet_y + 1.8                       # Head in world space
-        step_up = 0.05                              # Maximum auto-step height
+        step_up = 0.35                              # Maximum auto-step height (smooth threshold walking)
 
         # ── XZ wall blocking ─────────────────────────────────────────────────
         if colliders:
@@ -1378,12 +1387,12 @@ class Camera:
 
         # ── Jump trigger ─────────────────────────────────────────────────────
         if self.keys_pressed.get(b' ') and on_ground:
-            self.y_velocity = 0.22
+            self.y_velocity = 0.12
 
         # ── Apply gravity ────────────────────────────────────────────────────
         prev_feet = self.y - PLAYER_EYE_HEIGHT      # Feet before gravity
         self.y += self.y_velocity
-        self.y_velocity -= 0.01
+        self.y_velocity -= 0.014
         new_feet = self.y - PLAYER_EYE_HEIGHT        # Feet after gravity
 
         # ── Landing detection (sweep test) ───────────────────────────────────
@@ -1414,21 +1423,79 @@ class Camera:
         """Return True if any movement key is pressed."""
         return any(self.keys_pressed.get(k) for k in (b'w', b's', b'a', b'd'))
 
-    def apply(self):
-        """Apply camera transform to the OpenGL modelview matrix."""
+    def apply(self, colliders=None):
+        """Apply camera transform with Ray-AABB camera collision anti-clipping."""
         lx, ly, lz = self._look_direction()
-        
-        # 3rd person: Camera is behind and slightly above the player
-        distance = 3.0
-        height_offset = 1.2
-        
-        cam_x = self.x - lx * distance
-        cam_y = self.y + height_offset - ly * distance
-        cam_z = self.z - lz * distance
+
+        tx = self.x
+        ty = self.y + 1.0   # Target position (head height)
+        tz = self.z
+
+        max_distance = 3.0
+        height_offset = 0.2
+
+        dx = -lx * max_distance
+        dy = height_offset - ly * max_distance
+        dz = -lz * max_distance
+
+        target_dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if target_dist > 0.001:
+            ux = dx / target_dist
+            uy = dy / target_dist
+            uz = dz / target_dist
+        else:
+            ux, uy, uz = 0.0, 0.0, -1.0
+
+        actual_dist = target_dist
+
+        if colliders:
+            px, pz = self.x, self.z
+            nearby_colliders = [
+                c for c in colliders
+                if (c[0] - 4.0 <= px <= c[1] + 4.0 and c[4] - 4.0 <= pz <= c[5] + 4.0)
+            ]
+            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in nearby_colliders:
+                box_min_x, box_max_x = c_min_x - 0.15, c_max_x + 0.15
+                box_min_y, box_max_y = c_min_y - 0.15, c_max_y + 0.15
+                box_min_z, box_max_z = c_min_z - 0.15, c_max_z + 0.15
+
+                t_min = 0.0
+                t_max = actual_dist
+
+                if abs(ux) > 1e-6:
+                    t1 = (box_min_x - tx) / ux
+                    t2 = (box_max_x - tx) / ux
+                    t_min = max(t_min, min(t1, t2))
+                    t_max = min(t_max, max(t1, t2))
+                elif tx < box_min_x or tx > box_max_x:
+                    continue
+
+                if abs(uy) > 1e-6:
+                    t1 = (box_min_y - ty) / uy
+                    t2 = (box_max_y - ty) / uy
+                    t_min = max(t_min, min(t1, t2))
+                    t_max = min(t_max, max(t1, t2))
+                elif ty < box_min_y or ty > box_max_y:
+                    continue
+
+                if abs(uz) > 1e-6:
+                    t1 = (box_min_z - tz) / uz
+                    t2 = (box_max_z - tz) / uz
+                    t_min = max(t_min, min(t1, t2))
+                    t_max = min(t_max, max(t1, t2))
+                elif tz < box_min_z or tz > box_max_z:
+                    continue
+
+                if t_min <= t_max and t_min > 0.0:
+                    actual_dist = min(actual_dist, max(0.5, t_min - 0.2))
+
+        cam_x = tx + ux * actual_dist
+        cam_y = ty + uy * actual_dist
+        cam_z = tz + uz * actual_dist
 
         glLoadIdentity()
         gluLookAt(cam_x, cam_y, cam_z,
-                  self.x, self.y + 1.0, self.z,
+                  tx, ty, tz,
                   0.0, 1.0, 0.0)
 
     def on_key_down(self, key):
@@ -1495,6 +1562,7 @@ _spawn     = TutorialLevel.spawn_pos()
 camera     = Camera(_spawn[0], _spawn[1], _spawn[2])
 game_state = GameState()
 player_character = MainCharacter()
+inventory = InventoryManager()
 _temp_thin_police = ThinPoliceModel(x=3.0, y=0.0, z=6.0, yaw_deg=-45)
 _temp_fat_police = FatPoliceModel(x=-3.0, y=0.0, z=6.0, yaw_deg=45)
 _light_toggle_index = 0   # Cycles through HeistLevel breakable lights via 'l'
@@ -1538,14 +1606,18 @@ def display():
     elif game_state.current == GameState.STEALING_AREA:
         current_level_cls = HeistLevel
 
-    colliders = current_level_cls.get_colliders() if current_level_cls else None
+    colliders = current_level_cls.get_colliders() if (current_level_cls and hasattr(current_level_cls, 'get_colliders')) else None
     camera.process_movement(colliders)
-    camera.apply()
+    camera.apply(colliders)
 
     time_elapsed = time.time() - start_time
 
     if current_level_cls:
-        current_level_cls.draw(time_elapsed)
+        current_level_cls.draw(time_elapsed, camera_pos=(camera.x, camera.z))
+        if hasattr(current_level_cls, 'check_proximity_pickups'):
+            current_level_cls.check_proximity_pickups(camera.x, camera.y - 1.0, camera.z, inventory)
+
+    inventory.draw_hud(WindowConfig.WIDTH, WindowConfig.HEIGHT, delta_time=0.016)
 
     # Update player character to match the camera's position
     # The camera y represents the head level (approx 1.0 unit above ground)
@@ -1586,6 +1658,24 @@ def keyboard_down(key, x, y):
         camera.toggle_capture()
         return
 
+    # 'e' / 'E' / Tab — toggle Minecraft Inventory Overlay
+    if key in (b'e', b'E', b'\t'):
+        is_open = inventory.toggle_open()
+        if is_open:
+            camera.captured = False
+            glutSetCursor(GLUT_CURSOR_INHERIT)
+        else:
+            camera.captured = True
+            camera.first_move = True
+            glutSetCursor(GLUT_CURSOR_NONE)
+        return
+
+    # Hotbar slot selection (1..9)
+    if key in (b'3', b'4', b'5', b'6', b'7', b'8', b'9'):
+        inventory.select_hotbar(int(key.decode()) - 1)
+    elif inventory.is_open and key in (b'1', b'2'):
+        inventory.select_hotbar(int(key.decode()) - 1)
+
     # '2' — jump to Level 2 (Grand Heist Arena) for testing
     if key == b'2':
         game_state.current = GameState.STEALING_AREA
@@ -1625,6 +1715,12 @@ def mouse_motion(x, y):
     camera.on_mouse_move(x, y)
 
 
+def mouse_click(button, state, x, y):
+    if button == GLUT_LEFT_BUTTON and state == GLUT_DOWN:
+        if inventory.is_open:
+            inventory.handle_mouse_click(x, y, WindowConfig.WIDTH, WindowConfig.HEIGHT)
+
+
 def main():
     """Initialize GLUT, create window, register callbacks, start main loop."""
     global start_time
@@ -1643,6 +1739,7 @@ def main():
     glutReshapeFunc(reshape)
     glutKeyboardFunc(keyboard_down)
     glutKeyboardUpFunc(keyboard_up)
+    glutMouseFunc(mouse_click)
     glutPassiveMotionFunc(mouse_motion)
     glutMotionFunc(mouse_motion)
 

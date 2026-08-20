@@ -261,15 +261,29 @@ class HeistLevel:
     ]
 
     # ──────────────────────────────────────────────────────
-    # COLLECTIBLE DATA  (x, y, z, color, emissive, label)
+    # COLLECTIBLE DATA  (x, y, z, color, emissive, label, value)
     # ──────────────────────────────────────────────────────
     COLLECTIBLES = [
-        (27.0, 1.4, -20.0, C_IDOL,    C_IDOL_EM,    "Golden Idol"),
-        (-25.0, 1.2, -14.0, C_KEYCARD, C_KEYCARD_EM, "Keycard"),
-        (14.0, 0.6,  24.0, C_CASH,   C_CASH_EM,    "Cash Bag"),
-        (31.0, 0.6,  15.0, C_GEM,    C_GEM_EM,     "Antique Gem"),
-        (-12.0, 2.5,  20.0, C_STASH,  C_STASH_EM,   "Kitchen Stash"),
+        (27.0, 1.4, -20.0, C_IDOL,    C_IDOL_EM,    "Golden Idol",    5000),
+        (-25.0, 1.2, -14.0, C_KEYCARD, C_KEYCARD_EM, "Keycard",        1000),
+        (14.0, 0.6,  24.0, C_CASH,   C_CASH_EM,    "Cash Bag",       2500),
+        (31.0, 0.6,  15.0, C_GEM,    C_GEM_EM,     "Antique Gem",    3000),
+        (-12.0, 2.5,  20.0, C_STASH,  C_STASH_EM,   "Kitchen Stash",  1500),
     ]
+
+    collectibles_collected = [False, False, False, False, False]
+
+    @classmethod
+    def check_proximity_pickups(cls, px, py, pz, inventory):
+        """Check if player is near any uncollected items and auto-collect into inventory."""
+        for i, item_data in enumerate(cls.COLLECTIBLES):
+            if not cls.collectibles_collected[i]:
+                cx, cy, cz, color, em, name, val = item_data
+                dist = math.hypot(px - cx, pz - cz)
+                if dist < 1.8 and abs(py - cy) < 2.2:
+                    cls.collectibles_collected[i] = True
+                    from utils.inventory import InventoryItem
+                    inventory.add_item(InventoryItem(name, color, value=val))
 
     BOB_SPEED     = 2.0
     BOB_AMPLITUDE = 0.15
@@ -278,6 +292,48 @@ class HeistLevel:
     # ──────────────────────────────────────────────────────
     # PUBLIC API — for game logic hooks
     # ──────────────────────────────────────────────────────
+
+    _colliders = None
+
+    @classmethod
+    def get_colliders(cls):
+        """Automatically extract collision AABBs from draw calls."""
+        if cls._colliders is not None:
+            return cls._colliders
+
+        cls._colliders = []
+        import sys
+        level2_mod = sys.modules[cls.__module__]
+        original_draw_cube = level2_mod.draw_cube
+
+        def mock_draw_cube(x, y, z, sx, sy, sz, color, emissive=None):
+            c_min_y = y - sy / 2.0
+            c_max_y = y + sy / 2.0
+
+            # Filter out floor slabs (max_y < 0.1), thin trim (sy < 0.08),
+            # overhead ceiling fixtures (min_y > 2.5), and tiny details (sx < 0.15 and sz < 0.15)
+            if c_max_y > 0.1 and sy > 0.08 and c_min_y < 2.5 and (sx >= 0.15 or sz >= 0.15):
+                hw = sx / 2.0
+                hz = sz / 2.0
+                cls._colliders.append((x - hw, x + hw, c_min_y, c_max_y, z - hz, z + hz))
+
+        level2_mod.draw_cube = mock_draw_cube
+        try:
+            cls._draw_exterior_perimeter()
+            cls._draw_foyer(0.0)
+            cls._draw_corridor()
+            cls._draw_west_corridor()
+            cls._draw_south_corridor()
+            cls._draw_security_office()
+            cls._draw_vault(0.0)
+            cls._draw_library(0.0)
+            cls._draw_utility_room()
+            cls._draw_kitchen(0.0)
+            cls._draw_barracks(0.0)
+        finally:
+            level2_mod.draw_cube = original_draw_cube
+
+        return cls._colliders
 
     @classmethod
     def spawn_pos(cls):
@@ -311,9 +367,15 @@ class HeistLevel:
     # LIGHTING SETUP
     # ══════════════════════════════════════════════════════
 
+    _last_lights_on = None
+
     @classmethod
     def setup_lighting(cls):
-        """Configure all 7 dynamic light sources for this level."""
+        """Configure dynamic light sources for this level (cached)."""
+        current_state = tuple(cls.lights_on)
+        if cls._last_lights_on == current_state:
+            return
+        cls._last_lights_on = current_state
 
         # GL_LIGHT0 — near-black global ambient (stealth mood)
         glEnable(GL_LIGHT0)
@@ -426,38 +488,51 @@ class HeistLevel:
 
     @classmethod
     def _draw_tiled_floor(cls, cx, cz, w, d, tile_a, tile_b, y=0.0, tile_sz=None):
-        """Draw a checkerboard-tiled floor slab.
-
-        Args:
-            cx, cz: Centre of the floor area (world X/Z).
-            w, d:   Width (X) and depth (Z) of the floor area.
-            tile_a, tile_b: Alternating tile colors.
-            y:      Y height for the floor surface.
-            tile_sz: Tile size override; defaults to cls.TILE_SZ.
-        """
+        """Draw a checkerboard-tiled floor slab using batched quad rendering."""
         ts = tile_sz if tile_sz else cls.TILE_SZ
         half_w = w / 2.0
         half_d = d / 2.0
+        half_t = ts / 2.0
+
+        quads_a = []
+        quads_b = []
+
         ix = 0
-        x = cx - half_w + ts / 2.0
+        x = cx - half_w + half_t
         while x < cx + half_w:
             iz = 0
-            z = cz - half_d + ts / 2.0
+            z = cz - half_d + half_t
             while z < cz + half_d:
-                color = tile_a if (ix + iz) % 2 == 0 else tile_b
-                set_material(color)
-                half = ts / 2.0
-                glBegin(GL_QUADS)
-                glNormal3f(0.0, 1.0, 0.0)
-                glVertex3f(x - half, y, z - half)
-                glVertex3f(x + half, y, z - half)
-                glVertex3f(x + half, y, z + half)
-                glVertex3f(x - half, y, z + half)
-                glEnd()
+                if (ix + iz) % 2 == 0:
+                    quads_a.append((x, z))
+                else:
+                    quads_b.append((x, z))
                 z += ts
                 iz += 1
             x += ts
             ix += 1
+
+        if quads_a:
+            set_material(tile_a)
+            glBegin(GL_QUADS)
+            glNormal3f(0.0, 1.0, 0.0)
+            for (qx, qz) in quads_a:
+                glVertex3f(qx - half_t, y, qz - half_t)
+                glVertex3f(qx + half_t, y, qz - half_t)
+                glVertex3f(qx + half_t, y, qz + half_t)
+                glVertex3f(qx - half_t, y, qz + half_t)
+            glEnd()
+
+        if quads_b:
+            set_material(tile_b)
+            glBegin(GL_QUADS)
+            glNormal3f(0.0, 1.0, 0.0)
+            for (qx, qz) in quads_b:
+                glVertex3f(qx - half_t, y, qz - half_t)
+                glVertex3f(qx + half_t, y, qz - half_t)
+                glVertex3f(qx + half_t, y, qz + half_t)
+                glVertex3f(qx - half_t, y, qz + half_t)
+            glEnd()
 
     @classmethod
     def _draw_solid_floor(cls, cx, cz, w, d, color, y=0.0):
@@ -487,6 +562,45 @@ class HeistLevel:
         glVertex3f(cx - hw, y, cz + hd)
         glEnd()
 
+    @classmethod
+    def _draw_master_roof(cls):
+        """Draw an overarching master roof slab at Y=10.02 to seal all upper voids."""
+        cls._draw_ceiling_slab(0.0, 1.0, 74.0, 64.0, cls.C_CEILING_DARK, 10.02)
+
+    @classmethod
+    def _draw_master_floor(cls):
+        """Draw an overarching foundation floor slab at Y=-0.02 to prevent Z-fighting flickering."""
+        cls._draw_solid_floor(0.0, 1.0, 74.0, 64.0, cls.C_WALL_DARK, y=-0.02)
+
+    @classmethod
+    def _draw_exterior_perimeter(cls):
+        """Draw outer perimeter walls locking all rooms into one complete, enclosed building."""
+        wt = cls.WALL_T
+        H = 10.0
+        # North exterior wall
+        draw_cube(0.0, H / 2.0, -28.0, 74.0, H, wt, cls.C_WALL_DARK)
+        # South exterior wall
+        draw_cube(0.0, H / 2.0, 30.0, 74.0, H, wt, cls.C_WALL_DARK)
+        # West exterior wall
+        draw_cube(-33.0, H / 2.0, 1.0, wt, H, 60.0, cls.C_WALL_DARK)
+        # East exterior wall
+        draw_cube(35.0, H / 2.0, 1.0, wt, H, 60.0, cls.C_WALL_DARK)
+
+    @classmethod
+    def _draw_ceiling_transoms(cls):
+        """Draw vertical wall bulkheads bridging ceiling height differences between rooms."""
+        wt = cls.WALL_T
+        # Foyer (H=10) East bulkhead to Main Corridor (H=6)
+        draw_cube(12.0, 8.0, 0.0, wt, 4.0, 20.0, cls.C_WALL_STONE)
+        # Foyer (H=10) West bulkhead to West Corridor (H=6)
+        draw_cube(-12.0, 8.0, 0.0, wt, 4.0, 20.0, cls.C_WALL_STONE)
+        # Foyer (H=10) South bulkhead to South Corridor (H=6)
+        draw_cube(0.0, 8.0, 10.0, 24.0, 4.0, wt, cls.C_WALL_STONE)
+        # Corridor (H=6) bulkheads to Security Office (H=5) and Kitchen/Barracks (H=5)
+        draw_cube(-18.0, 5.5, -16.0, wt, 1.0, 12.0, cls.C_WALL_DARK)
+        draw_cube(-8.0, 5.5, 15.0, 18.0, 1.0, wt, cls.C_WALL_DARK)
+        draw_cube(14.0, 5.5, 15.0, 12.0, 1.0, wt, cls.C_WALL_DARK)
+
     # ══════════════════════════════════════════════════════
     # SHARED PROP DRAWERS
     # ══════════════════════════════════════════════════════
@@ -504,21 +618,20 @@ class HeistLevel:
         """
         dh = h if h else cls.DOOR_H
         dw = w if w else cls.DOOR_W
-        ft = cls.DOOR_FT
-        ft2 = ft + 0.1
+        ft = 0.15
         mid_h = dh / 2.0
         top_y = dh + ft / 2.0
 
         if facing == 'z':
             # Vertical posts left & right
-            draw_cube(x - dw / 2.0, mid_h, z, ft, dh, ft2, cls.C_DOOR_FRAME)
-            draw_cube(x + dw / 2.0, mid_h, z, ft, dh, ft2, cls.C_DOOR_FRAME)
+            draw_cube(x - dw / 2.0, mid_h, z, ft, dh, ft, cls.C_DOOR_FRAME)
+            draw_cube(x + dw / 2.0, mid_h, z, ft, dh, ft, cls.C_DOOR_FRAME)
             # Horizontal lintel
-            draw_cube(x, top_y, z, dw + ft * 2, ft, ft2, cls.C_DOOR_FRAME)
+            draw_cube(x, top_y, z, dw + ft * 2, ft, ft, cls.C_DOOR_FRAME)
         else:
-            draw_cube(x, mid_h, z - dw / 2.0, ft2, dh, ft, cls.C_DOOR_FRAME)
-            draw_cube(x, mid_h, z + dw / 2.0, ft2, dh, ft, cls.C_DOOR_FRAME)
-            draw_cube(x, top_y, z, ft2, ft, dw + ft * 2, cls.C_DOOR_FRAME)
+            draw_cube(x, mid_h, z - dw / 2.0, ft, dh, ft, cls.C_DOOR_FRAME)
+            draw_cube(x, mid_h, z + dw / 2.0, ft, dh, ft, cls.C_DOOR_FRAME)
+            draw_cube(x, top_y, z, ft, ft, dw + ft * 2, cls.C_DOOR_FRAME)
 
     @classmethod
     def _draw_wall_sconce(cls, x, y, z, facing, light_on):
@@ -679,9 +792,16 @@ class HeistLevel:
         draw_cube(cx, H / 2.0, cz - hd,
                   cls.FOYER_W, H, wt, cls.C_WALL_STONE)
 
-        # West wall — solid
-        draw_cube(cx - hw, H / 2.0, cz,
-                  wt, H, cls.FOYER_D, cls.C_WALL_STONE)
+        # West wall — gap leading to West Corridor
+        w_gap = cls.DOOR_W + 0.5
+        w_seg_n = (cls.FOYER_D - w_gap) * 0.5
+        w_seg_s = (cls.FOYER_D - w_gap) * 0.5
+        draw_cube(cx - hw, H / 2.0, cz - hd + w_seg_n / 2.0,
+                  wt, H, w_seg_n, cls.C_WALL_STONE)
+        draw_cube(cx - hw, H / 2.0, cz + hd - w_seg_s / 2.0,
+                  wt, H, w_seg_s, cls.C_WALL_STONE)
+        draw_cube(cx - hw, cls.DOOR_H + (H - cls.DOOR_H) / 2.0, cz,
+                  wt, H - cls.DOOR_H, w_gap + 0.2, cls.C_WALL_STONE)
 
         # East wall — gap leading to corridor
         e_gap = cls.DOOR_W + 0.5
@@ -701,7 +821,7 @@ class HeistLevel:
         draw_cube(cx - hw + wt / 2.0, 0.12, cz, 0.12, 0.24, cls.FOYER_D, cls.C_GOLD_TRIM)
 
         # ── 8 marble columns (two rows of 4)
-        col_xs = [-9.0, -3.0, 3.0, 9.0]
+        col_xs = [-6.5, -2.5, 2.5, 6.5]
         for col_x in col_xs:
             for col_z in [-5.0, 5.0]:
                 shaft_h = H - 0.8
@@ -914,9 +1034,6 @@ class HeistLevel:
             draw_cube(cx - hw - 0.6, H / 2.0, clz, 1.2, H, 2.5, cls.C_WALL_DARK)
             cls._draw_door_frame(cx - hw, clz, 'x', h=2.8, w=2.0)
 
-        # ── Door to Security Office (north-west branch)
-        cls._draw_door_frame(cx - hw, cz - hd + 3.0, 'x')
-
         # ── Door to Trophy Vault (north end)
         cls._draw_door_frame(cx, cz - hd, 'z')
         # Keycard scanner panel
@@ -925,6 +1042,57 @@ class HeistLevel:
         kpad_em = cls.C_KEYPAD_ON if cls.lights_on[3] else cls.C_KEYPAD_OFF
         draw_sphere(cx + cls.DOOR_W / 2.0 + 0.5, 1.35, cz - hd + 0.25,
                     0.06, (0.1, 0.1, 0.1), emissive=kpad_em)
+
+    @classmethod
+    def _draw_west_corridor(cls):
+        """Draw the West Corridor — connecting Foyer to Security Office & Utility Room."""
+        cx = -16.0
+        cz = -3.5
+        w = 8.0
+        d = 37.0
+        H = 6.0
+        wt = cls.WALL_T
+
+        # Floor & Ceiling
+        cls._draw_tiled_floor(cx, cz, w, d, cls.C_TILE_A, cls.C_WALL_DARK, tile_sz=2.0)
+        cls._draw_ceiling_slab(cx, cz, w, d, cls.C_CEILING_DARK, H)
+
+        # Outer West Wall (from Z = -10 to Z = 1 between Security Office and Utility Room)
+        draw_cube(cx - w / 2.0, H / 2.0, -4.5, wt, H, 11.0, cls.C_WALL_PLASTER)
+        # Connecting wall segment between Security Office (X=-18) and Utility Room (X=-20)
+        draw_cube(-19.0, H / 2.0, -10.0, 2.0, H, wt, cls.C_WALL_PLASTER)
+
+        # North End Wall
+        draw_cube(cx, H / 2.0, cz - d / 2.0, w, H, wt, cls.C_WALL_PLASTER)
+
+        # South End Wall
+        draw_cube(cx, H / 2.0, cz + d / 2.0, w, H, wt, cls.C_WALL_PLASTER)
+
+        # Door frames (handled cleanly by room drawers — no duplicate frames)
+        pass
+
+    @classmethod
+    def _draw_south_corridor(cls):
+        """Draw the South Corridor — connecting Foyer to Kitchen & Guard Barracks."""
+        cx = 1.5
+        cz = 12.5
+        w = 37.0
+        d = 5.0
+        H = 6.0
+        wt = cls.WALL_T
+
+        # Floor & Ceiling
+        cls._draw_tiled_floor(cx, cz, w, d, cls.C_TILE_A, cls.C_WALL_DARK, tile_sz=2.0)
+        cls._draw_ceiling_slab(cx, cz, w, d, cls.C_CEILING_DARK, H)
+
+        # Outer West Wall
+        draw_cube(cx - w / 2.0, H / 2.0, cz, wt, H, d, cls.C_WALL_PLASTER)
+
+        # Outer East Wall
+        draw_cube(cx + w / 2.0, H / 2.0, cz, wt, H, d, cls.C_WALL_PLASTER)
+
+        # Door frames (handled cleanly by room drawers — no duplicate frames)
+        pass
 
     # ══════════════════════════════════════════════════════
     # ROOM 3 — SECURITY OFFICE
@@ -949,17 +1117,16 @@ class HeistLevel:
         # Walls
         draw_cube(cx, H / 2.0, cz - hd, cls.SEC_W, H, wt, cls.C_WALL_DARK)  # North
         draw_cube(cx, H / 2.0, cz + hd, cls.SEC_W, H, wt, cls.C_WALL_DARK)  # South
-        draw_cube(cx - hw, H / 2.0, cz, wt, H, cls.SEC_D, cls.C_WALL_DARK)  # West
-        # East wall — has door + one-way glass
+        draw_cube(cx - hw, H / 2.0, cz, wt, H, cls.SEC_D, cls.C_WALL_DARK)  # West (solid)
+        # East wall — has door gap to West Corridor
         e_seg = (cls.SEC_D - cls.DOOR_W) / 2.0
         draw_cube(cx + hw, H / 2.0, cz - hd + e_seg / 2.0,
                   wt, H, e_seg, cls.C_WALL_DARK)
         draw_cube(cx + hw, H / 2.0, cz + hd - e_seg / 2.0,
                   wt, H, e_seg, cls.C_WALL_DARK)
         draw_cube(cx + hw, cls.DOOR_H + (H - cls.DOOR_H) / 2.0,
-                  cz - hd + e_seg + cls.DOOR_W / 2.0,
-                  wt, H - cls.DOOR_H, cls.DOOR_W, cls.C_WALL_DARK)
-        cls._draw_door_frame(cx + hw, cz - hd + e_seg + cls.DOOR_W / 2.0, 'x')
+                  cz, wt, H - cls.DOOR_H, cls.DOOR_W + 0.2, cls.C_WALL_DARK)
+        cls._draw_door_frame(cx + hw, cz, 'x')
 
         # One-way glass window (south side of east wall)
         draw_cube(cx + hw, 1.8, cz + hd - 1.5, 0.1, 1.6, 2.2, cls.C_GLASS)
@@ -1094,9 +1261,10 @@ class HeistLevel:
                   0.05, case_h, case_d, cls.C_GLASS)   # Right glass
 
         # ── Golden Idol (collectible) — bobbing inside case
-        bob_y = 0.72 + math.sin(t * cls.BOB_SPEED) * cls.BOB_AMPLITUDE
-        draw_sphere(cx, bob_y, cz - 1.5, cls.COLLECT_R,
-                    cls.C_IDOL, emissive=cls.C_IDOL_EM)
+        if not cls.collectibles_collected[0]:
+            bob_y = 0.72 + math.sin(t * cls.BOB_SPEED) * cls.BOB_AMPLITUDE
+            draw_sphere(cx, bob_y, cz - 1.5, cls.COLLECT_R,
+                        cls.C_IDOL, emissive=cls.C_IDOL_EM)
 
         # ── Hidden floor hatch (darker tile square in NE corner)
         hatch_x = cx + hw - 1.5
@@ -1205,9 +1373,10 @@ class HeistLevel:
         cls._draw_ceiling_slab(hidden_x, hidden_z, 3.0, 4.0, cls.C_CEILING_DARK, H)
 
         # Hidden gem collectible inside
-        gem_y = 0.5 + math.sin(t * cls.BOB_SPEED + 1.0) * cls.BOB_AMPLITUDE
-        draw_sphere(hidden_x, gem_y, hidden_z, cls.COLLECT_R,
-                    cls.C_GEM, emissive=cls.C_GEM_EM)
+        if not cls.collectibles_collected[3]:
+            gem_y = 0.5 + math.sin(t * cls.BOB_SPEED + 1.0) * cls.BOB_AMPLITUDE
+            draw_sphere(hidden_x, gem_y, hidden_z, cls.COLLECT_R,
+                        cls.C_GEM, emissive=cls.C_GEM_EM)
 
         # Floor vent grate leading into hidden passage
         vo = cls.VENT_OPENINGS[3]
@@ -1265,20 +1434,19 @@ class HeistLevel:
         cls._draw_ceiling_slab(cx, cz, cls.UTIL_W, cls.UTIL_D, cls.C_CEILING_DARK, H)
 
         # Walls
-        draw_cube(cx, H / 2.0, cz - hd, cls.UTIL_W, H, wt, cls.C_WALL_DARK)
-        draw_cube(cx, H / 2.0, cz + hd, cls.UTIL_W, H, wt, cls.C_WALL_DARK)
-        draw_cube(cx + hw, H / 2.0, cz, wt, H, cls.UTIL_D, cls.C_WALL_DARK)
+        draw_cube(cx, H / 2.0, cz - hd, cls.UTIL_W, H, wt, cls.C_WALL_DARK)  # North
+        draw_cube(cx, H / 2.0, cz + hd, cls.UTIL_W, H, wt, cls.C_WALL_DARK)  # South
+        draw_cube(cx - hw, H / 2.0, cz, wt, H, cls.UTIL_D, cls.C_WALL_DARK)  # West (solid outer)
 
-        # West wall — vent opening + door to foyer
+        # East wall — door gap to West Corridor
         u_seg = (cls.UTIL_D - cls.DOOR_W) / 2.0
-        draw_cube(cx - hw, H / 2.0, cz - hd + u_seg / 2.0,
+        draw_cube(cx + hw, H / 2.0, cz - hd + u_seg / 2.0,
                   wt, H, u_seg, cls.C_WALL_DARK)
-        draw_cube(cx - hw, H / 2.0, cz + hd - u_seg / 2.0,
+        draw_cube(cx + hw, H / 2.0, cz + hd - u_seg / 2.0,
                   wt, H, u_seg, cls.C_WALL_DARK)
-        draw_cube(cx - hw, cls.DOOR_H + (H - cls.DOOR_H) / 2.0,
-                  cz - hd + u_seg + cls.DOOR_W / 2.0,
-                  wt, H - cls.DOOR_H, cls.DOOR_W, cls.C_WALL_DARK)
-        cls._draw_door_frame(cx - hw, cz - hd + u_seg + cls.DOOR_W / 2.0, 'x')
+        draw_cube(cx + hw, cls.DOOR_H + (H - cls.DOOR_H) / 2.0,
+                  cz, wt, H - cls.DOOR_H, cls.DOOR_W + 0.2, cls.C_WALL_DARK)
+        cls._draw_door_frame(cx + hw, cz, 'x')
 
         # ── Wall vent (west-facing, in west wall)
         vo = cls.VENT_OPENINGS[0]
@@ -1402,9 +1570,10 @@ class HeistLevel:
                       0.04, upper_cab_h - 0.08, 0.8, cls.C_WOOD_MED)
 
         # ── Kitchen stash collectible (inside upper north-cabinet, visible when open)
-        stash_y = 2.5 + math.sin(t * cls.BOB_SPEED + 2.0) * cls.BOB_AMPLITUDE
-        draw_sphere(cx - 2.0, stash_y, cz - hd + 0.4, cls.COLLECT_R,
-                    cls.C_STASH, emissive=cls.C_STASH_EM)
+        if not cls.collectibles_collected[4]:
+            stash_y = 2.5 + math.sin(t * cls.BOB_SPEED + 2.0) * cls.BOB_AMPLITUDE
+            draw_sphere(cx - 2.0, stash_y, cz - hd + 0.4, cls.COLLECT_R,
+                        cls.C_STASH, emissive=cls.C_STASH_EM)
 
         # ── Lower cabinet countertop (L-shape along north + west wall)
         lower_h = 1.0
@@ -1543,9 +1712,10 @@ class HeistLevel:
             draw_cube(bx, 2.35, bz + 0.5, 2.2, 0.35, 0.06, cls.C_METAL_DARK)
 
         # ── Loot items (cash bags) on floor
-        cash_y = 0.38 + math.sin(t * cls.BOB_SPEED + 0.5) * cls.BOB_AMPLITUDE
-        draw_sphere(cx - 1.0, cash_y, cz + 1.0, cls.COLLECT_R,
-                    cls.C_CASH, emissive=cls.C_CASH_EM)
+        if not cls.collectibles_collected[2]:
+            cash_y = 0.38 + math.sin(t * cls.BOB_SPEED + 0.5) * cls.BOB_AMPLITUDE
+            draw_sphere(cx - 1.0, cash_y, cz + 1.0, cls.COLLECT_R,
+                        cls.C_CASH, emissive=cls.C_CASH_EM)
 
         # ── Dim overhead fixture
         draw_cube(cx, H - 0.2, cz, cls.BUNK_W * 0.4, 0.1, 0.4, cls.C_METAL_DARK)
@@ -1558,6 +1728,8 @@ class HeistLevel:
     @classmethod
     def _draw_keycard(cls, t):
         """Draw the keycard collectible on the security office desk."""
+        if cls.collectibles_collected[1]:
+            return
         kx, ky, kz = cls.COLLECTIBLES[1][0], cls.COLLECTIBLES[1][1], cls.COLLECTIBLES[1][2]
         bob_y = 1.2 + math.sin(t * cls.BOB_SPEED + 3.0) * cls.BOB_AMPLITUDE
         # Card body
@@ -1601,17 +1773,26 @@ class HeistLevel:
     # ══════════════════════════════════════════════════════
 
     @classmethod
-    def draw(cls, time_elapsed):
-        """Draw the entire Level 2 scene. Called every frame by the game loop.
+    def draw(cls, time_elapsed, camera_pos=None):
+        """Draw the Level 2 scene with spatial room frustum culling.
 
         Args:
             time_elapsed: Total elapsed time in seconds (drives animations).
+            camera_pos:   Optional (x, z) tuple of camera position for room culling.
         """
         cls.setup_lighting()
 
-        # Core rooms
+        # Master foundation, exterior perimeter walls, and roof enclosures
+        cls._draw_master_floor()
+        cls._draw_master_roof()
+        cls._draw_exterior_perimeter()
+        cls._draw_ceiling_transoms()
+
+        # All core rooms & connecting corridors (rendered unconditionally to guarantee no missing walls)
         cls._draw_foyer(time_elapsed)
         cls._draw_corridor()
+        cls._draw_west_corridor()
+        cls._draw_south_corridor()
         cls._draw_security_office()
         cls._draw_vault(time_elapsed)
         cls._draw_library(time_elapsed)
