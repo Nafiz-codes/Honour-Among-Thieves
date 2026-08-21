@@ -1387,7 +1387,7 @@ class Camera:
 
         # ── Jump trigger ─────────────────────────────────────────────────────
         if self.keys_pressed.get(b' ') and on_ground:
-            self.y_velocity = 0.12
+            self.y_velocity = .25
 
         # ── Apply gravity ────────────────────────────────────────────────────
         prev_feet = self.y - PLAYER_EYE_HEIGHT      # Feet before gravity
