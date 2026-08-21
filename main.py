@@ -540,6 +540,10 @@ class Obstacle:
         """Render 3D GLUT/OpenGL geometry. Subclasses override this."""
         pass
 
+    def interact(self, camera):
+        """Triggered when the player interacts with this obstacle. Returns True if state changed."""
+        return False
+
     def get_bounding_box(self):
         """Return axis-aligned bounding box (min_x, max_x, min_y, max_y, min_z, max_z)."""
         hw = self.width / 2.0
@@ -576,6 +580,15 @@ class BoxObstacle(Obstacle):
             accent_color=accent_color
         )
         self.size = size
+
+    def interact(self, camera):
+        if not self.can_be_pushed:
+            return False
+        rad_yaw = math.radians(camera.yaw)
+        self.x += math.cos(rad_yaw) * 1.5
+        self.z += math.sin(rad_yaw) * 1.5
+        print("Pushed the box!")
+        return True
 
     def draw(self):
         s = self.size
@@ -638,10 +651,15 @@ class ClosetObstacle(Obstacle):
             rotation=rotation,
             is_interactive=True,
             can_hide_inside=True,
-            can_be_pushed=False,
             color=color,
             accent_color=accent_color
         )
+        self.is_open = False
+
+    def interact(self, camera):
+        self.is_open = not self.is_open
+        print("Closet door", "opened" if self.is_open else "closed")
+        return True
 
     def draw(self):
         w, h, d = self.width, self.height, self.depth
@@ -695,30 +713,48 @@ class ClosetObstacle(Obstacle):
         front_z = d / 2.0 - t / 2.0
 
         set_material(self.color)
-        # Left door
+        
+        # ── LEFT DOOR GROUP ──
+        glPushMatrix()
+        if self.is_open:
+            glTranslatef(-door_w - 0.01, 0.0, front_z)
+            glRotatef(-90.0, 0.0, 1.0, 0.0)
+            glTranslatef(door_w + 0.01, 0.0, -front_z)
+            
         glPushMatrix()
         glTranslatef(-door_w / 2.0 - 0.01, 0.0, front_z)
         glScalef(door_w, door_h, t * 0.8)
         glutSolidCube(1)
         glPopMatrix()
 
-        # Right door
+        set_material((0.85, 0.75, 0.3))  # Brass handles
+        glPushMatrix()
+        glTranslatef(-0.06, 0.0, front_z + t)
+        glutSolidSphere(0.06, 8, 8)
+        glPopMatrix()
+        
+        glPopMatrix()
+
+        # ── RIGHT DOOR GROUP ──
+        set_material(self.color)
+        glPushMatrix()
+        if self.is_open:
+            glTranslatef(door_w + 0.01, 0.0, front_z)
+            glRotatef(90.0, 0.0, 1.0, 0.0)
+            glTranslatef(-door_w - 0.01, 0.0, -front_z)
+            
         glPushMatrix()
         glTranslatef(door_w / 2.0 + 0.01, 0.0, front_z)
         glScalef(door_w, door_h, t * 0.8)
         glutSolidCube(1)
         glPopMatrix()
 
-        # Metallic door handles
         set_material((0.85, 0.75, 0.3))  # Brass handles
-        glPushMatrix()
-        glTranslatef(-0.06, 0.0, front_z + t)
-        glutSolidSphere(0.06, 8, 8)
-        glPopMatrix()
-
         glPushMatrix()
         glTranslatef(0.06, 0.0, front_z + t)
         glutSolidSphere(0.06, 8, 8)
+        glPopMatrix()
+        
         glPopMatrix()
 
         glPopMatrix()
@@ -738,10 +774,26 @@ class DumpsterObstacle(Obstacle):
             rotation=rotation,
             is_interactive=True,
             can_hide_inside=True,
-            can_be_pushed=True,
             color=color,
             accent_color=accent_color
         )
+        self.saved_camera_pos = None
+
+    def interact(self, camera):
+        self.is_player_hiding = not self.is_player_hiding
+        if self.is_player_hiding:
+            self.saved_camera_pos = (camera.x, camera.y, camera.z)
+            camera.x = self.x
+            camera.z = self.z
+            camera.y = self.y + self.height * 0.5
+            camera.movement_locked = True
+            print("Hiding in dumpster")
+        else:
+            if self.saved_camera_pos:
+                camera.x, camera.y, camera.z = self.saved_camera_pos
+            camera.movement_locked = False
+            print("Exited dumpster")
+        return True
 
     def draw(self):
         w, h, d = self.width, self.height, self.depth
@@ -770,16 +822,18 @@ class DumpsterObstacle(Obstacle):
         set_material((0.1, 0.1, 0.12))
         lid_w = w / 2.0 - 0.05
         lid_d = d * 0.95
+        lid_angle = 0.0 if self.is_player_hiding else 5.0
+        
         glPushMatrix()
         glTranslatef(-lid_w / 2.0 - 0.02, h * 0.46, 0.0)
-        glRotatef(5.0, 0.0, 0.0, 1.0)  # Slightly open lid
+        glRotatef(lid_angle, 0.0, 0.0, 1.0)
         glScalef(lid_w, 0.08, lid_d)
         glutSolidCube(1)
         glPopMatrix()
 
         glPushMatrix()
         glTranslatef(lid_w / 2.0 + 0.02, h * 0.46, 0.0)
-        glRotatef(-5.0, 0.0, 0.0, 1.0)
+        glRotatef(-lid_angle, 0.0, 0.0, 1.0)
         glScalef(lid_w, 0.08, lid_d)
         glutSolidCube(1)
         glPopMatrix()
@@ -821,6 +875,18 @@ class ObstacleManager:
 
     def get_obstacles(self):
         return self.obstacles
+
+    def try_interact(self, camera):
+        closest_obs = None
+        min_dist = 3.0
+        for obs in self.obstacles:
+            dist = obs.distance_to(camera.x, camera.z)
+            if dist < min_dist:
+                closest_obs = obs
+                min_dist = dist
+        if closest_obs:
+            return closest_obs.interact(camera)
+        return False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1201,7 +1267,7 @@ class TutorialLevel:
             if c_max_y > 0.1 and sy > 0.08:
                 hw = sx / 2.0
                 hz = sz / 2.0
-                cls._colliders.append((x - hw, x + hw, c_min_y, c_max_y, z - hz, z + hz))
+                cls._colliders.append((x - hw, x + hw, c_min_y, c_max_y, z - hz, z + hz, None))
                 
         main_mod.draw_cube = mock_draw_cube
 
@@ -1217,11 +1283,20 @@ class TutorialLevel:
             for obs in cls.get_obstacle_manager().obstacles:
                 min_x, max_x, min_y, max_y, min_z, max_z = obs.get_bounding_box()
                 if max_y > 0.1:
-                    cls._colliders.append((min_x, max_x, min_y, max_y, min_z, max_z))
+                    cls._colliders.append((min_x, max_x, min_y, max_y, min_z, max_z, obs))
         finally:
             main_mod.draw_cube = original_draw_cube
 
         return cls._colliders
+
+    @classmethod
+    def interact(cls, camera):
+        manager = cls.get_obstacle_manager()
+        if manager.try_interact(camera):
+            # Reset collision map
+            cls._colliders = None
+            return True
+        return False
 
     @classmethod
     def draw(cls, time_elapsed, camera_pos=None):
@@ -1295,6 +1370,7 @@ class Camera:
         self.mouse_last_y = WindowConfig.HEIGHT // 2
         self.captured     = True
         self.first_move   = True
+        self.movement_locked = False
 
     def _look_direction(self):
         rad_yaw   = math.radians(self.yaw)
@@ -1311,6 +1387,9 @@ class Camera:
         in world space. camera.y is eye-level, which is PLAYER_EYE_HEIGHT
         above the player's feet in world space.
         """
+        if self.movement_locked:
+            return
+
         PLAYER_EYE_HEIGHT = 1.0   # camera.y sits this far above the feet
 
         rad_yaw   = math.radians(self.yaw)
@@ -1343,25 +1422,38 @@ class Camera:
         step_up = 0.35                              # Maximum auto-step height (smooth threshold walking)
 
         # ── XZ wall blocking ─────────────────────────────────────────────────
+        pushed_something = False
         if colliders:
             collision_x = False
             collision_z = False
 
-            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+            for c in colliders:
+                c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z = c[:6]
+                owner = c[6] if len(c) > 6 else None
                 # Block only if the player's body overlaps the collider vertically
                 # AND the player is NOT standing on top (feet below top - step_up)
                 if (feet_y < c_max_y - step_up and head_y > c_min_y and
                     new_x + pr > c_min_x and new_x - pr < c_max_x and
                     self.z + pr > c_min_z and self.z - pr < c_max_z):
-                    collision_x = True
-                    break
+                    if owner and getattr(owner, 'can_be_pushed', False):
+                        owner.x += (new_x - self.x)
+                        pushed_something = True
+                    else:
+                        collision_x = True
+                        break
 
-            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+            for c in colliders:
+                c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z = c[:6]
+                owner = c[6] if len(c) > 6 else None
                 if (feet_y < c_max_y - step_up and head_y > c_min_y and
                     self.x + pr > c_min_x and self.x - pr < c_max_x and
                     new_z + pr > c_min_z and new_z - pr < c_max_z):
-                    collision_z = True
-                    break
+                    if owner and getattr(owner, 'can_be_pushed', False):
+                        owner.z += (new_z - self.z)
+                        pushed_something = True
+                    else:
+                        collision_z = True
+                        break
 
             if not collision_x:
                 self.x = new_x
@@ -1375,7 +1467,8 @@ class Camera:
         # (used for jump trigger — must be computed BEFORE gravity)
         standing_surface = 0.0   # World-space Y of the floor
         if colliders:
-            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+            for c in colliders:
+                c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z = c[:6]
                 if (self.x + pr > c_min_x and self.x - pr < c_max_x and
                     self.z + pr > c_min_z and self.z - pr < c_max_z):
                     # Player feet are at or very near the top of this surface
@@ -1399,7 +1492,8 @@ class Camera:
         # Find the highest surface the player is falling through this frame.
         best_landing = 0.0    # World-space floor
         if colliders:
-            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in colliders:
+            for c in colliders:
+                c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z = c[:6]
                 if (self.x + pr > c_min_x and self.x - pr < c_max_x and
                     self.z + pr > c_min_z and self.z - pr < c_max_z):
                     # Landing: player feet were above (or at) the surface,
@@ -1418,6 +1512,8 @@ class Camera:
         if self.y < self.ground_y:
             self.y = self.ground_y
             self.y_velocity = 0.0
+            
+        return pushed_something
 
     def is_moving(self):
         """Return True if any movement key is pressed."""
@@ -1454,7 +1550,8 @@ class Camera:
                 c for c in colliders
                 if (c[0] - 4.0 <= px <= c[1] + 4.0 and c[4] - 4.0 <= pz <= c[5] + 4.0)
             ]
-            for (c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z) in nearby_colliders:
+            for c in nearby_colliders:
+                c_min_x, c_max_x, c_min_y, c_max_y, c_min_z, c_max_z = c[:6]
                 box_min_x, box_max_x = c_min_x - 0.15, c_max_x + 0.15
                 box_min_y, box_max_y = c_min_y - 0.15, c_max_y + 0.15
                 box_min_z, box_max_z = c_min_z - 0.15, c_max_z + 0.15
@@ -1607,7 +1704,9 @@ def display():
         current_level_cls = HeistLevel
 
     colliders = current_level_cls.get_colliders() if (current_level_cls and hasattr(current_level_cls, 'get_colliders')) else None
-    camera.process_movement(colliders)
+    if camera.process_movement(colliders):
+        if current_level_cls:
+            current_level_cls._colliders = None
     camera.apply(colliders)
 
     time_elapsed = time.time() - start_time
@@ -1702,6 +1801,12 @@ def keyboard_down(key, x, y):
         print(f"Light {_light_toggle_index % 6} toggled "
               f"({'ON' if HeistLevel.lights_on[_light_toggle_index % 6] else 'OFF'})")
         _light_toggle_index += 1
+        return
+
+    # 'f' / 'F' — interaction
+    if key in (b'f', b'F'):
+        if game_state.current == GameState.TUTORIAL:
+            TutorialLevel.interact(camera)
         return
 
     camera.on_key_down(key)
