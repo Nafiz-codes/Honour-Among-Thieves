@@ -655,9 +655,41 @@ class ClosetObstacle(Obstacle):
             accent_color=accent_color
         )
         self.is_open = False
+        # Animation state (0.0 = fully closed, 1.0 = fully open)
+        self._anim_progress = 0.0   # Current visual interpolation progress
+        self._anim_start_time = None  # time.time() when animation started
+        self._anim_duration = 0.5     # Seconds to fully open/close
+        self._anim_opening = True     # Direction of animation
+
+    def _update_anim(self):
+        """Advance the door-swing animation and return the current eased progress."""
+        if self._anim_start_time is None:
+            return self._anim_progress
+
+        elapsed = time.time() - self._anim_start_time
+        t = min(elapsed / self._anim_duration, 1.0)
+
+        # Ease-in-out cubic
+        if t < 0.5:
+            ease = 4.0 * t * t * t
+        else:
+            p = t - 1.0
+            ease = 1.0 + 4.0 * p * p * p
+
+        if self._anim_opening:
+            self._anim_progress = ease
+        else:
+            self._anim_progress = 1.0 - ease
+
+        if t >= 1.0:
+            self._anim_start_time = None  # Animation complete
+
+        return self._anim_progress
 
     def interact(self, camera):
         self.is_open = not self.is_open
+        self._anim_opening = self.is_open
+        self._anim_start_time = time.time()
         print("Closet door", "opened" if self.is_open else "closed")
         return True
 
@@ -713,14 +745,18 @@ class ClosetObstacle(Obstacle):
         front_z = d / 2.0 - t / 2.0
 
         set_material(self.color)
-        
+
+        # Advance the swing animation each frame
+        anim = self._update_anim()  # 0.0 = closed, 1.0 = fully open
+        swing_angle = anim * 90.0   # 0 → 90 degrees
+
         # ── LEFT DOOR GROUP ──
+        # Pivot is at the LEFT hinge edge (x = -door_w - 0.01)
         glPushMatrix()
-        if self.is_open:
-            glTranslatef(-door_w - 0.01, 0.0, front_z)
-            glRotatef(-90.0, 0.0, 1.0, 0.0)
-            glTranslatef(door_w + 0.01, 0.0, -front_z)
-            
+        glTranslatef(-door_w - 0.01, 0.0, front_z)  # Move pivot to hinge
+        glRotatef(-swing_angle, 0.0, 1.0, 0.0)       # Swing open
+        glTranslatef(door_w + 0.01, 0.0, -front_z)  # Move back
+
         glPushMatrix()
         glTranslatef(-door_w / 2.0 - 0.01, 0.0, front_z)
         glScalef(door_w, door_h, t * 0.8)
@@ -732,17 +768,17 @@ class ClosetObstacle(Obstacle):
         glTranslatef(-0.06, 0.0, front_z + t)
         glutSolidSphere(0.06, 8, 8)
         glPopMatrix()
-        
+
         glPopMatrix()
 
         # ── RIGHT DOOR GROUP ──
+        # Pivot is at the RIGHT hinge edge (x = door_w + 0.01)
         set_material(self.color)
         glPushMatrix()
-        if self.is_open:
-            glTranslatef(door_w + 0.01, 0.0, front_z)
-            glRotatef(90.0, 0.0, 1.0, 0.0)
-            glTranslatef(-door_w - 0.01, 0.0, -front_z)
-            
+        glTranslatef(door_w + 0.01, 0.0, front_z)   # Move pivot to hinge
+        glRotatef(swing_angle, 0.0, 1.0, 0.0)        # Swing open
+        glTranslatef(-door_w - 0.01, 0.0, -front_z) # Move back
+
         glPushMatrix()
         glTranslatef(door_w / 2.0 + 0.01, 0.0, front_z)
         glScalef(door_w, door_h, t * 0.8)
@@ -754,7 +790,7 @@ class ClosetObstacle(Obstacle):
         glTranslatef(0.06, 0.0, front_z + t)
         glutSolidSphere(0.06, 8, 8)
         glPopMatrix()
-        
+
         glPopMatrix()
 
         glPopMatrix()
@@ -763,8 +799,32 @@ class ClosetObstacle(Obstacle):
 class DumpsterObstacle(Obstacle):
     """
     Industrial Metal Dumpster.
-    Provides cover and can be pushed or hid inside.
+    Provides cover and can be hidden inside with a cinematic jump-in animation.
+
+    Hide sequence  (press F near dumpster when outside):
+      Phase 1 — LID_OPEN   (0.40 s): lids swing open.
+      Phase 2 — JUMP_IN    (0.55 s): character runs to dumpster then arcs in.
+      Phase 3 — LID_CLOSE  (0.35 s): lids close over player. Camera snaps inside.
+      Phase 4 — HIDDEN     (∞):      player is inside, movement locked.
+
+    Exit sequence (press F near dumpster when inside):
+      Phase 5 — LID_OPEN_X  (0.35 s): lids swing open.
+      Phase 6 — JUMP_OUT    (0.55 s): character arcs out. Camera restored.
+      Phase 7 — LID_CLOSE_X (0.35 s): lids swing closed behind player.
     """
+
+    # ── phase constants ──────────────────────────────────────────────────────
+    _PH_NONE       = 0
+    _PH_LID_OPEN   = 1
+    _PH_JUMP_IN    = 2
+    _PH_LID_CLOSE  = 3
+    _PH_HIDDEN     = 4
+    _PH_LID_OPEN_X = 5
+    _PH_JUMP_OUT   = 6
+    _PH_LID_CLO_X  = 7
+
+    _PHASE_DUR = {1: 0.40, 2: 0.55, 3: 0.35, 5: 0.35, 6: 0.55, 7: 0.35}
+    _NEXT_PHASE = {1: 2, 2: 3, 3: 4, 5: 6, 6: 7, 7: 0}
 
     def __init__(self, x, y, z, width=2.6, height=1.6, depth=1.6, rotation=0.0,
                  color=(0.18, 0.35, 0.24), accent_color=(0.12, 0.22, 0.15)):
@@ -778,24 +838,183 @@ class DumpsterObstacle(Obstacle):
             accent_color=accent_color
         )
         self.saved_camera_pos = None
+        self._hide_phase  = self._PH_NONE
+        self._phase_start = 0.0
+        self._camera_ref  = None
+        # Character start position & yaw captured when hide starts
+        self._char_start  = (0.0, 0.0, 0.0, 0.0)   # (x, y_feet, z, yaw_deg)
+        # Landing position for exit jump (restored camera feet level)
+        self._char_exit   = (0.0, 0.0, 0.0)         # (x, y_feet, z)
+
+    # ── helpers ─────────────────────────────────────────────────────────────
+
+    def _phase_t(self):
+        """Normalised [0, 1] time within the current phase."""
+        dur = self._PHASE_DUR.get(self._hide_phase, 1.0)
+        return min((time.time() - self._phase_start) / dur, 1.0)
+
+    @staticmethod
+    def _ease_out(t):
+        return 1.0 - (1.0 - t) ** 2
+
+    @staticmethod
+    def _ease_in_out(t):
+        if t < 0.5:
+            return 4.0 * t * t * t
+        p = t - 1.0
+        return 1.0 + 4.0 * p * p * p
+
+    def _lid_progress(self):
+        """Return lid open amount [0=closed, 1=open] for the current phase."""
+        ph = self._hide_phase
+        t  = self._phase_t()
+        if   ph == self._PH_LID_OPEN:   return self._ease_in_out(t)
+        elif ph == self._PH_JUMP_IN:    return 1.0
+        elif ph == self._PH_LID_CLOSE:  return 1.0 - self._ease_in_out(t)
+        elif ph == self._PH_HIDDEN:     return 0.0
+        elif ph == self._PH_LID_OPEN_X: return self._ease_in_out(t)
+        elif ph == self._PH_JUMP_OUT:   return 1.0
+        elif ph == self._PH_LID_CLO_X:  return 1.0 - self._ease_in_out(t)
+        return 0.0   # _PH_NONE
+
+    def _advance_phase(self):
+        """Tick the state machine; fire side-effects on transitions."""
+        if self._hide_phase in (self._PH_NONE, self._PH_HIDDEN):
+            return
+        dur = self._PHASE_DUR.get(self._hide_phase, 1.0)
+        if time.time() - self._phase_start < dur:
+            return
+
+        next_ph = self._NEXT_PHASE.get(self._hide_phase, self._PH_NONE)
+        cam = self._camera_ref
+
+        # ── transition side-effects ──────────────────────────────────────────
+        if next_ph == self._PH_HIDDEN and cam:
+            # Snap camera inside dumpster
+            cam.x = self.x
+            cam.z = self.z
+            cam.y = self.y + self.height * 0.5
+
+        if next_ph == self._PH_NONE and cam:
+            # Exit animation fully done: unlock movement
+            cam.movement_locked = False
+            self.is_player_hiding = False
+
+        self._hide_phase  = next_ph
+        self._phase_start = time.time()
+
+    # ── public API ───────────────────────────────────────────────────────────
+
+    def is_animating(self):
+        """True while any hide/exit animation phase is running."""
+        return self._hide_phase not in (self._PH_NONE, self._PH_HIDDEN)
+
+    def get_character_pose(self):
+        """Return (x, y_feet, z, yaw_deg, visible) for overriding the player draw,
+        or None when the normal camera-driven draw should be used."""
+        ph = self._hide_phase
+        if ph == self._PH_NONE:
+            return None
+
+        cx, cy, cz, cyaw = self._char_start
+        dumpster_top = self.y + self.height + 0.15   # Just above the rim
+        dx, dz = self.x, self.z
+
+        # Yaw that faces from character start toward dumpster center
+        angle_rad = math.atan2(dz - cz, dx - cx)
+        yaw_toward = -math.degrees(angle_rad) + 90.0
+
+        # ── Phase 1: stand at start, face dumpster ───────────────────────────
+        if ph == self._PH_LID_OPEN:
+            return (cx, cy, cz, yaw_toward, True)
+
+        # ── Phase 2: run to dumpster then leap in ────────────────────────────
+        elif ph == self._PH_JUMP_IN:
+            t = self._phase_t()
+            RUN_END = 0.55   # Fraction of phase spent running
+            if t <= RUN_END:
+                rt = self._ease_out(t / RUN_END)
+                x = cx + (dx - cx) * rt
+                z = cz + (dz - cz) * rt
+                return (x, cy, z, yaw_toward, True)
+            else:
+                # Leap upward arc into the dumpster
+                jt = (t - RUN_END) / (1.0 - RUN_END)
+                # Parabolic: rises to peak then descends into dumpster
+                peak_h = dumpster_top + 0.6
+                if jt < 0.5:
+                    y = cy + (peak_h - cy) * (jt / 0.5)
+                else:
+                    y = peak_h + (dumpster_top - 0.4 - peak_h) * ((jt - 0.5) / 0.5)
+                visible = jt < 0.85   # Vanish as they drop in
+                return (dx, y, dz, yaw_toward, visible)
+
+        # ── Phases 3, 4, 5: inside — character invisible ─────────────────────
+        elif ph in (self._PH_LID_CLOSE, self._PH_HIDDEN, self._PH_LID_OPEN_X):
+            return (cx, cy, cz, cyaw, False)
+
+        # ── Phase 6: leap out of dumpster ────────────────────────────────────
+        elif ph == self._PH_JUMP_OUT:
+            t = self._phase_t()
+            ex, ey, ez = self._char_exit
+            angle_out = math.atan2(ez - dz, ex - dx)
+            yaw_out   = -math.degrees(angle_out) + 90.0
+            if t < 0.15:
+                return (dx, dumpster_top, dz, yaw_out, False)  # Appear just before jump
+            jt = self._ease_out((t - 0.15) / 0.85)
+            x  = dx + (ex - dx) * jt
+            z  = dz + (ez - dz) * jt
+            peak_h = dumpster_top + 0.8
+            if jt < 0.5:
+                y = dumpster_top + (peak_h - dumpster_top) * (jt / 0.5)
+            else:
+                y = peak_h + (ey - peak_h) * ((jt - 0.5) / 0.5)
+            return (x, y, z, yaw_out, True)
+
+        # ── Phase 7: lids closing, character stands at exit pos ──────────────
+        elif ph == self._PH_LID_CLO_X:
+            ex, ey, ez = self._char_exit
+            angle_out = math.atan2(ez - dz, ex - dx)
+            yaw_out   = -math.degrees(angle_out) + 90.0
+            return (ex, ey, ez, yaw_out, True)
+
+        return None
 
     def interact(self, camera):
-        self.is_player_hiding = not self.is_player_hiding
-        if self.is_player_hiding:
+        # Ignore new interactions while an animation is in progress
+        if self._hide_phase not in (self._PH_NONE, self._PH_HIDDEN):
+            return False
+
+        self._camera_ref = camera
+
+        if not self.is_player_hiding:
+            # ── START HIDING ─────────────────────────────────────────────────
+            char_yaw = -camera.yaw + 90.0
+            self._char_start = (camera.x, camera.y - 1.0, camera.z, char_yaw)
             self.saved_camera_pos = (camera.x, camera.y, camera.z)
-            camera.x = self.x
-            camera.z = self.z
-            camera.y = self.y + self.height * 0.5
             camera.movement_locked = True
-            print("Hiding in dumpster")
+            self.is_player_hiding = True
+            self._hide_phase  = self._PH_LID_OPEN
+            self._phase_start = time.time()
+            print("Dumpster: starting hide animation")
         else:
+            # ── START EXITING ────────────────────────────────────────────────
+            # Restore camera immediately so it's outside for the exit anim
             if self.saved_camera_pos:
                 camera.x, camera.y, camera.z = self.saved_camera_pos
-            camera.movement_locked = False
-            print("Exited dumpster")
+            # Exit landing = restored camera feet position
+            sx, sy, sz = self.saved_camera_pos
+            self._char_exit = (sx, sy - 1.0, sz)
+            self._hide_phase  = self._PH_LID_OPEN_X
+            self._phase_start = time.time()
+            print("Dumpster: starting exit animation")
+
         return True
 
     def draw(self):
+        # Tick state machine every frame
+        self._advance_phase()
+
         w, h, d = self.width, self.height, self.depth
         cy = self.y + h / 2.0
 
@@ -818,22 +1037,26 @@ class DumpsterObstacle(Obstacle):
         glutSolidCube(1)
         glPopMatrix()
 
-        # Black plastic lids (angled/split top)
+        # Black plastic lids (cinematic animated split top)
         set_material((0.1, 0.1, 0.12))
         lid_w = w / 2.0 - 0.05
         lid_d = d * 0.95
-        lid_angle = 0.0 if self.is_player_hiding else 5.0
-        
+        lid_angle = 5.0 + self._lid_progress() * 75.0   # 5° resting tilt → 80° flung open
+
+        # Left lid — pivots at its inner right edge
         glPushMatrix()
-        glTranslatef(-lid_w / 2.0 - 0.02, h * 0.46, 0.0)
-        glRotatef(lid_angle, 0.0, 0.0, 1.0)
+        glTranslatef(-0.02, h * 0.46, 0.0)
+        glRotatef(-lid_angle, 0.0, 0.0, 1.0)
+        glTranslatef(-lid_w / 2.0, 0.0, 0.0)
         glScalef(lid_w, 0.08, lid_d)
         glutSolidCube(1)
         glPopMatrix()
 
+        # Right lid — pivots at its inner left edge
         glPushMatrix()
-        glTranslatef(lid_w / 2.0 + 0.02, h * 0.46, 0.0)
-        glRotatef(-lid_angle, 0.0, 0.0, 1.0)
+        glTranslatef(0.02, h * 0.46, 0.0)
+        glRotatef(lid_angle, 0.0, 0.0, 1.0)
+        glTranslatef(lid_w / 2.0, 0.0, 0.0)
         glScalef(lid_w, 0.08, lid_d)
         glutSolidCube(1)
         glPopMatrix()
@@ -858,6 +1081,8 @@ class DumpsterObstacle(Obstacle):
                 glPopMatrix()
 
         glPopMatrix()
+
+
 
 
 class ObstacleManager:
@@ -1718,14 +1943,32 @@ def display():
 
     inventory.draw_hud(WindowConfig.WIDTH, WindowConfig.HEIGHT, delta_time=0.016)
 
-    # Update player character to match the camera's position
-    # The camera y represents the head level (approx 1.0 unit above ground)
-    player_character.x = camera.x
-    player_character.y = camera.y - 1.0
-    player_character.z = camera.z
-    # Adjust yaw so the character faces the direction the camera is looking
-    player_character.yaw_deg = -camera.yaw + 90.0
-    player_character.draw(time_elapsed, camera.is_moving())
+    # Check if a DumpsterObstacle is overriding the player character pose
+    # (during jump-in / jump-out cinematic animations).
+    char_pose_override = None
+    if current_level_cls and hasattr(current_level_cls, 'get_obstacle_manager'):
+        for _obs in current_level_cls.get_obstacle_manager().obstacles:
+            if isinstance(_obs, DumpsterObstacle):
+                _pose = _obs.get_character_pose()
+                if _pose is not None:
+                    char_pose_override = _pose
+                    break
+
+    if char_pose_override is not None:
+        _px, _py, _pz, _pyaw, _pvis = char_pose_override
+        if _pvis:
+            player_character.x       = _px
+            player_character.y       = _py
+            player_character.z       = _pz
+            player_character.yaw_deg = _pyaw
+            player_character.draw(time_elapsed, True)
+    else:
+        # Normal: character follows the camera
+        player_character.x       = camera.x
+        player_character.y       = camera.y - 1.0
+        player_character.z       = camera.z
+        player_character.yaw_deg = -camera.yaw + 90.0
+        player_character.draw(time_elapsed, camera.is_moving())
 
     # Temporary: Draw the police models for review
     if game_state.current == GameState.TUTORIAL:
