@@ -170,24 +170,24 @@ class InventoryManager:
         start_x = (win_w - total_w) / 2.0
         start_y = 20.0
 
-        # Background panel
+        # Background panel (Brighter slate UI panel)
         self._draw_2d_rect(start_x - 10, start_y - 10, start_x + total_w + 10, start_y + slot_sz + 10,
-                           (0.12, 0.12, 0.12), 0.85)
+                           (0.25, 0.28, 0.33), 0.95)
         self._draw_2d_border(start_x - 10, start_y - 10, start_x + total_w + 10, start_y + slot_sz + 10,
-                            (0.3, 0.3, 0.3), 2)
+                            (0.65, 0.70, 0.78), 2)
 
         for i in range(self.HOTBAR_SIZE):
             sx = start_x + i * (slot_sz + gap)
             sy = start_y
 
-            # Inset slot background
-            self._draw_2d_rect(sx, sy, sx + slot_sz, sy + slot_sz, (0.08, 0.08, 0.08), 0.9)
+            # Inset slot background (Brighter slot tile)
+            self._draw_2d_rect(sx, sy, sx + slot_sz, sy + slot_sz, (0.18, 0.20, 0.25), 0.95)
             
             # Active slot selection highlight
             if i == self.active_hotbar_index:
-                self._draw_2d_border(sx - 2, sy - 2, sx + slot_sz + 2, sy + slot_sz + 2, (1.0, 0.84, 0.0), 3)
+                self._draw_2d_border(sx - 2, sy - 2, sx + slot_sz + 2, sy + slot_sz + 2, (1.0, 0.92, 0.2), 3)
             else:
-                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.25, 0.25, 0.25), 1)
+                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.50, 0.55, 0.62), 1)
 
             # Slot number key label (1-9)
             draw_text_2d(int(sx + 4), int(sy + slot_sz - 14), str(i + 1), win_w, win_h)
@@ -204,10 +204,10 @@ class InventoryManager:
         px = (win_w - panel_w) / 2.0
         py = (win_h - panel_h) / 2.0
 
-        # Main Minecraft dark panel
-        self._draw_2d_rect(px, py, px + panel_w, py + panel_h, (0.15, 0.15, 0.15), 0.95)
-        self._draw_2d_border(px, py, px + panel_w, py + panel_h, (0.4, 0.4, 0.4), 3)
-        self._draw_2d_border(px + 4, py + 4, px + panel_w - 4, py + panel_h - 4, (0.05, 0.05, 0.05), 1)
+        # Main Minecraft bright panel
+        self._draw_2d_rect(px, py, px + panel_w, py + panel_h, (0.28, 0.30, 0.36), 0.96)
+        self._draw_2d_border(px, py, px + panel_w, py + panel_h, (0.75, 0.80, 0.88), 3)
+        self._draw_2d_border(px + 4, py + 4, px + panel_w - 4, py + panel_h - 4, (0.12, 0.14, 0.18), 1)
 
         # Header Title & Loot Value Counter
         draw_text_2d(int(px + 20), int(py + panel_h - 30), "INVENTORY  --  STOLEN LOOT", win_w, win_h)
@@ -226,18 +226,18 @@ class InventoryManager:
                 sx = grid_start_x + col * (slot_sz + gap)
                 sy = grid_start_y + (2 - row) * (slot_sz + gap)
 
-                self._draw_2d_rect(sx, sy, sx + slot_sz, sy + slot_sz, (0.08, 0.08, 0.08), 0.95)
-                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.3, 0.3, 0.3), 1)
+                self._draw_2d_rect(sx, sy, sx + slot_sz, sy + slot_sz, (0.18, 0.20, 0.25), 0.95)
+                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.50, 0.55, 0.62), 1)
 
                 if idx == self.held_slot_index:
-                    self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.2, 0.8, 1.0), 2)
+                    self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.2, 0.9, 1.0), 2)
 
                 item = self.slots[idx]
                 if item is not None:
                     self._draw_item_in_slot(sx, sy, slot_sz, item, win_w, win_h)
 
         # Separator line
-        self._draw_2d_rect(px + 15, py + 100, px + panel_w - 15, py + 102, (0.3, 0.3, 0.3), 1.0)
+        self._draw_2d_rect(px + 15, py + 100, px + panel_w - 15, py + 102, (0.50, 0.55, 0.62), 1.0)
 
         # 2. Hotbar Row inside Inventory (Slots 0..8)
         hotbar_y = py + 35
@@ -246,14 +246,14 @@ class InventoryManager:
             sx = grid_start_x + col * (slot_sz + gap)
             sy = hotbar_y
 
-            self._draw_2d_rect(sx, sy, sx + slot_sz, sy + slot_sz, (0.08, 0.08, 0.08), 0.95)
+            self._draw_2d_rect(sx, sy, sx + slot_sz, sy + slot_sz, (0.18, 0.20, 0.25), 0.95)
             if col == self.active_hotbar_index:
-                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (1.0, 0.84, 0.0), 2)
+                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (1.0, 0.92, 0.2), 2)
             else:
-                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.3, 0.3, 0.3), 1)
+                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.50, 0.55, 0.62), 1)
 
             if idx == self.held_slot_index:
-                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.2, 0.8, 1.0), 2)
+                self._draw_2d_border(sx, sy, sx + slot_sz, sy + slot_sz, (0.2, 0.9, 1.0), 2)
 
             item = self.slots[idx]
             if item is not None:
@@ -266,13 +266,29 @@ class InventoryManager:
         """Draw an item icon block, label, and stack count inside a slot."""
         cx = sx + sz / 2.0
         cy = sy + sz / 2.0
-        icon_sz = sz * 0.45
 
-        # Item 2D colored icon box
-        self._draw_2d_rect(cx - icon_sz / 2.0, cy - icon_sz / 2.0,
-                           cx + icon_sz / 2.0, cy + icon_sz / 2.0, item.color, 1.0)
-        self._draw_2d_border(cx - icon_sz / 2.0, cy - icon_sz / 2.0,
-                            cx + icon_sz / 2.0, cy + icon_sz / 2.0, (1.0, 1.0, 1.0), 1)
+        if item.name == "Glass Bottle":
+            # ── Custom 2D Glass Bottle Icon (Vibrant Emerald Glass) ──────────────
+            # Bottle main body (Emerald green glass cylinder)
+            self._draw_2d_rect(cx - 7, cy - 10, cx + 7, cy + 3, (0.25, 0.95, 0.65), 1.0)
+            self._draw_2d_border(cx - 7, cy - 10, cx + 7, cy + 3, (0.50, 1.0, 0.80), 1)
+
+            # Bottle neck
+            self._draw_2d_rect(cx - 3, cy + 3, cx + 3, cy + 10, (0.25, 0.95, 0.65), 1.0)
+            self._draw_2d_border(cx - 3, cy + 3, cx + 3, cy + 10, (0.50, 1.0, 0.80), 1)
+
+            # Cork top
+            self._draw_2d_rect(cx - 4, cy + 10, cx + 4, cy + 13, (0.70, 0.48, 0.25), 1.0)
+
+            # Specular shine
+            self._draw_2d_rect(cx - 5, cy - 8, cx - 3, cy + 1, (1.0, 1.0, 1.0), 0.85)
+        else:
+            # Standard item icon box
+            icon_sz = sz * 0.45
+            self._draw_2d_rect(cx - icon_sz / 2.0, cy - icon_sz / 2.0,
+                               cx + icon_sz / 2.0, cy + icon_sz / 2.0, item.color, 1.0)
+            self._draw_2d_border(cx - icon_sz / 2.0, cy - icon_sz / 2.0,
+                                cx + icon_sz / 2.0, cy + icon_sz / 2.0, (1.0, 1.0, 1.0), 1)
 
         # Stack count (bottom-right)
         if item.count > 1:
